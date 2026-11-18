@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "balance": "tsx scripts/balance.ts",
     "test": "tsx scripts/determinism.ts",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "runs": "tsx scripts/runs.ts",
+    "explain": "tsx scripts/explain-check.ts"
   },
   "dependencies": {
     "phaser": "^3.90.0"

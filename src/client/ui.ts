@@ -2,6 +2,7 @@ import { randomAiBuild } from '../sim/bot';
 import { SIM_VERSION, cdTicks, simulate } from '../sim/combat';
 import { HASTE_BONUS, POWER_BONUS, activeBonuses, fits, matches, type Offer } from '../sim/grid';
 import { HEROES, HEROES_BY_ID } from '../sim/heroes';
+import { explain } from '../sim/explain';
 import { hashSeed } from '../sim/rng';
 import * as R from '../sim/run';
 import { ARCH_NAME, SKILLS } from '../sim/skills';
@@ -27,6 +28,8 @@ let stage!: Stage;
 let selected: string | null = 'arena';
 let run: R.RunState | null = null;
 let view: View = 'title';
+/** seed of the next run: it also decides which heroes are offered. Kept until a run starts, so leaving the screen does not re-roll. */
+let nextSeed: number | null = null;
 let last: FightResponse | null = null;
 let lastDay = 0;
 let lastDamage = 0;
@@ -210,9 +213,11 @@ function renderTown() {
       }
       body += `<div class="actions"><button class="primary" data-a="enterArena">${runActive() ? 'เล่นต่อ' : 'เข้าสนามประลอง'}</button></div>`;
     } else if (b.id === 'hall') {
-      body += `<div class="heroes">${HEROES.map(
+      body += `<p class="muted">ฮีโร่ทั้งหมด ${HEROES.length} ตัว · แต่ละรอบสุ่มให้เลือก ${R.HERO_CHOICES} ตัวจากคนละสาย</p><div class="heroes">${HEROES.map(
         (h) => `<div class="card arch-${h.arch}">${heroArt(h.id, 'small')}<div class="nm">${h.name}</div><div class="tag">${ARCH_NAME[h.arch]}</div>
-          <div class="desc">${h.passive}</div><div class="desc muted">skill เฉพาะ: ${SKILLS[h.unique].name}</div></div>`,
+          <div class="desc"><b>วิธีเล่น:</b> ${h.style}</div>
+          <div class="desc"><b>ความสามารถ:</b> ${h.passive}</div>
+          <div class="desc muted">skill เฉพาะ: <b>${SKILLS[h.unique].name}</b>: ${SKILLS[h.unique].desc(1)}</div></div>`,
       ).join('')}</div>`;
     } else if (b.future) {
       body += `<p class="muted">เร็วๆ นี้: ${b.future}</p>`;
@@ -237,10 +242,12 @@ function renderTitle() {
   <p class="muted">ชนะ ${R.WIN_TARGET} ครั้งก่อนเลือด ${R.START_HP} หมด · แพ้เสียเลือดเท่ากับเลขวัน · สู้กับ build ของผู้เล่นอื่นในวันเดียวกัน</p>
   <label class="name">ชื่อของคุณ <input id="name" maxlength="24" value="${esc(fetchStore(NAME_KEY) ?? '')}" placeholder="ผู้เล่น"></label>
   ${resume}
-  <div class="heroes">${HEROES.map(
+  ${runActive() ? '' : `<p class="muted">รอบนี้มีให้เลือก ${R.HERO_CHOICES} ตัวจากคนละสาย (ดูฮีโร่ทั้งหมดได้ที่หอฮีโร่ในเมือง)</p>`}
+  <div class="heroes">${(runActive() ? [] : R.heroChoices((nextSeed ??= randSeed())).map((id) => HEROES_BY_ID[id])).map(
     (h) => `<button class="hero arch-${h.arch}" data-a="start" data-i="${h.id}">
       ${heroArt(h.id)}
       <b>${h.name}</b><span class="tag">${ARCH_NAME[h.arch]}</span>
+      <span>${h.style}</span>
       <span>${h.passive}</span>
       <span class="muted">skill เฉพาะ: ${SKILLS[h.unique].name}: ${SKILLS[h.unique].desc(1)}</span>
     </button>`,
@@ -377,6 +384,17 @@ const FOE = '#d95926';
  * Post-fight "You vs Enemy": mirrored bars per kind of value (you left, enemy right, same scale per row),
  * then where the damage each side took came from, as ranked bars. Hover any bar for the skills behind it.
  */
+/** C6: Thai explanation of the fight (headline, facts, why) from side `me`'s point of view. */
+function explainHTML(r: CombatResult, builds: [Build, Build], me: 0 | 1, names2: [string, string]) {
+  const x = explain(r, builds, me, names2);
+  const won = r.winner === me;
+  return `<div class="explain">
+    <p><b>${esc(x.headline)}</b></p>
+    <ul class="facts">${x.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
+    ${x.reasons.length ? `<h4>${won ? 'ทำไมชนะ' : 'ทำไมแพ้ และลองอะไรต่อ'}</h4><ul class="reasons">${x.reasons.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+  </div>`;
+}
+
 function vsSummary(r: CombatResult, builds: [Build, Build], names2: [string, string]) {
   const fmt = (key: keyof BlockStat, v: number) => (key === 'fz' ? (v / 10).toFixed(1) : String(v));
   const breakdown = (side: 0 | 1, key: keyof BlockStat) => {
@@ -484,6 +502,7 @@ function renderResult() {
    ${f.offline ? '<span class="muted">(ออฟไลน์: เซิร์ฟเวอร์ไม่ตอบ สู้กับ AI ในเครื่อง)</span>' : ''}</p>
   <p>${f.won ? `ชนะแล้ว ${r.wins}/${R.WIN_TARGET}` : `เสียเลือด ${lastDamage} · เหลือ ${Math.max(0, r.hp)}`} · คะแนน build ใหม่ ${f.rating}</p>
   <h3>สรุปการสู้</h3>
+  ${lastBuild ? explainHTML(f.result, [lastBuild, f.opponent.build], 0, ['คุณ', f.opponent.name]) : ''}
   ${lastBuild ? vsSummary(f.result, [lastBuild, f.opponent.build], ['คุณ', f.opponent.name]) : ''}
   <h3>build ของคู่ต่อสู้</h3>
   ${buildList(f.opponent.build)}
@@ -544,6 +563,7 @@ function renderReplayDone() {
     <div><h3>${esc(f.b.name)}${f.b.ai ? ' (AI)' : ''} · ${HEROES_BY_ID[f.b.build.hero].name}</h3>${buildList(f.b.build)}</div>
   </div>
   <h3>สรุปการสู้</h3>
+  ${replayResult ? explainHTML(replayResult, [f.a.build, f.b.build], 0, [f.a.name, f.b.name]) : ''}
   ${replayResult ? vsSummary(replayResult, [f.a.build, f.b.build], [f.a.name, f.b.name]) : ''}
   <div class="actions"><button data-a="replayAgain">ดูอีกครั้ง</button><button class="primary" data-a="leaveReplay">เล่นเกมของคุณ</button></div>`;
 }
@@ -565,13 +585,15 @@ function describe(e: CombatEvent): string | null {
         case 'slow':
           return `&nbsp;&nbsp;${who(e.side)} ช้าลง ${e.value}%`;
         case 'rage':
-          return `${who(e.side)} <b>คลั่ง!</b> พลังโจมตี +3`;
+          return `${who(e.side)} <b>คลั่ง!</b> พลังโจมตี +${e.value}`;
         case 'amplify':
           return e.value > 0 ? `&nbsp;&nbsp;${who(e.side)} บัฟเป็น 2 เท่า (+${e.value})` : null;
         case 'cleanse':
           return e.value > 0 ? `&nbsp;&nbsp;${who(e.side)} ล้างดีบัฟ ${e.value} อย่าง` : null;
         case 'dispel':
           return e.value > 0 ? `&nbsp;&nbsp;${who(e.side)} ถูกลบบัฟ ${e.value} อย่าง` : null;
+        case 'delay':
+          return e.value > 0 ? `&nbsp;&nbsp;${who(e.side)} คูลดาวน์ถอยหลัง ${(e.value / 10).toFixed(1)} วิ` : `&nbsp;&nbsp;${who(e.side)} ต้านการถ่วงเวลา`;
         default:
           return null;
       }
@@ -687,7 +709,12 @@ function onClick(ev: Event) {
   switch (a) {
     case 'start':
       sel = null;
-      run = R.newRun(arg, randSeed(), uid());
+      {
+        const seed = nextSeed ?? randSeed();
+        if (!R.heroChoices(seed).includes(arg)) break; // only an offered hero can start a run
+        nextSeed = null;
+        run = R.newRun(arg, seed, uid());
+      }
       view = 'shop';
       break;
     case 'resume':

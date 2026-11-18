@@ -1,7 +1,7 @@
 ﻿import { HASTE_BONUS, POWER_BONUS, activeBonuses, bonusValue, neighbours } from './grid';
 import { HEROES_BY_ID, type CombatHooks, type HookFighter } from './heroes';
 import { Rng } from './rng';
-import { SKILLS, gearPower, lvScale, overclockPower, type Ctx, type FighterView } from './skills';
+import { SKILLS, flatScale, gearPower, lvScale, steepScale, overclockPower, type Ctx, type FighterView } from './skills';
 import type {
   BlockStat, Build, CombatEvent, CombatResult, CooldownTrace, EventBody, Fx, Mark, Side, SkillInstance, Snap, StatusKind,
 } from './types';
@@ -18,17 +18,37 @@ import type {
  */
 
 /** Bump when combat rules or numbers change: old replays can no longer be re-simulated. */
-export const SIM_VERSION = 5;
+export const SIM_VERSION = 6;
 export const TPS = 10; // ticks per second
-export const FATIGUE_START = 30 * TPS; // after 30s both sides take growing damage
 export const MAX_TICKS = 90 * TPS;
-export const hpFor = (day: number) => Math.round(24 + 3.2 * Math.max(1, day) ** 2);
+/**
+ * Base HP per day, tuned with `npm run balance` so fights last ≈10–13s on days 1–3,
+ * 15–22s on days 4–7 and 23–30s on day 8+ (bot damage per second grows about linearly with the day).
+ */
+const HP_BY_DAY = [16, 15, 24, 60, 78, 100, 135, 255, 260, 330, 390, 450, 520];
+export const hpFor = (day: number) => {
+  const d = Math.max(1, Math.floor(day));
+  return d <= HP_BY_DAY.length ? HP_BY_DAY[d - 1] : HP_BY_DAY[HP_BY_DAY.length - 1] + 60 * (d - HP_BY_DAY.length);
+};
+/** Fatigue: after this many ticks both sides take growing damage (a backstop that ends stalled fights). */
+export const fatigueStart = (day: number) => Math.round(Math.min(30, day <= 3 ? 8 : 4 + 2.5 * day) * TPS);
+/** Fatigue damage in the n-th second = n × step, so it ends a fight a few seconds after it starts on every day. */
+export const fatigueStep = (day: number) => Math.max(1, Math.ceil(hpFor(day) / 30));
 const MAX_FREEZE_TICKS = 15;
 const FREEZE_DR = 0.6; // each recent freeze makes the next one 40% shorter
 const FREEZE_DR_DECAY = 4 * TPS; // one stack of diminishing returns wears off every 4s
-const FREEZE_CAP = 8 * TPS; // total frozen time per fight; after that freezes are resisted
+/** Total frozen time per fight (≈25% of the target fight length); after that freezes are resisted. */
+export const freezeCap = (day: number) => (day <= 3 ? 3 : day <= 7 ? 5 : 7) * TPS;
 const SLOW_CAP = 0.5;
 const MAX_CHAIN = 8;
+/** A thorns stack lasts this long, so thorns cannot pile up for the whole fight. */
+export const THORNS_TICKS = 10 * TPS;
+/** A reflection is at most this share of the hit that caused it. */
+export const THORNS_MAX = 0.75;
+/** While the enemy has thorns, your healing is multiplied by this. */
+export const THORNS_HEAL = 0.5;
+/** สลายเวท removes this share of the enemy's shield. */
+export const DISPEL_SHIELD = 0.3;
 
 interface Block {
   inst: SkillInstance;
@@ -51,6 +71,8 @@ interface Block {
 interface Stack {
   v: number;
   idx: number;
+  /** tick when this stack wears off (thorns only) */
+  until?: number;
 }
 
 interface Fighter {
@@ -63,6 +85,8 @@ interface Fighter {
   shield: number;
   frozen: number;
   frozenTotal: number;
+  /** cooldown ticks pushed back by cast delay (shares the control cap with freeze) */
+  delayN: number;
   slowPct: number;
   slowT: number;
   growth: Stack[];
@@ -120,7 +144,7 @@ function makeFighter(b: Build, side: Side, day: number): Fighter {
   return {
     side, hero: b.hero, hooks, blocks: makeBlocks(b),
     hp: maxHp, maxHp, shield: hooks.startShield ? hooks.startShield(0, maxHp) : 0,
-    frozen: 0, frozenTotal: 0, slowPct: 0, slowT: 0, growth: [], charge: 1, chargeIdx: -1, thorns: [],
+    frozen: 0, frozenTotal: 0, delayN: 0, slowPct: 0, slowT: 0, growth: [], charge: 1, chargeIdx: -1, thorns: [],
     burns: [], freezeN: 0, steadfast: false, flags: {},
     stats: b.skills.map(emptyStat),
   };
@@ -148,14 +172,21 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
   };
   const view = (x: Fighter): FighterView => ({
     hp: x.hp, maxHp: x.maxHp, shield: x.shield, frozen: x.frozen > 0, hero: x.hero,
+    thorns: sum(x.thorns), burnLeft: x.burns.reduce((n, b) => n + b.dps * Math.ceil(b.t / TPS), 0),
   });
   const hookApi = (f: Fighter): HookFighter => ({
     get hero() { return f.hero; },
     get hp() { return f.hp; },
     get maxHp() { return f.maxHp; },
     get shield() { return f.shield; },
+    get foeSlowed() { return F[1 - f.side].slowT > 0; },
+    get foeFrozen() { return F[1 - f.side].frozen > 0; },
     flags: f.flags,
     grow(n) { f.growth.push({ v: n, idx: -1 }); },
+    thorns(n, permanent = false) {
+      f.thorns.push({ v: n, idx: -1, ...(permanent ? {} : { until: t + THORNS_TICKS }) });
+      emit({ type: 'status', side: f.side, status: 'thorns', value: sum(f.thorns) });
+    },
     addShield(n) {
       f.shield += n;
       emit({ type: 'shield', side: f.side, amount: n });
@@ -183,14 +214,19 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
     }
   };
   const first = rng.int(2); // who acts first on even ticks
+  const fStart = fatigueStart(day);
+  const fStep = fatigueStep(day);
+  const fCap = freezeCap(day);
   for (const f of F) f.hooks.onStart?.(hookApi(f));
 
   /** owner = the attacker's block that gets credit (idx into its build.skills), -1 = none */
-  function deal(target: Fighter, amount: number, shieldable: boolean, src: string, owner = -1, bonusPart = 0) {
+  /** shieldable: true / false, or the share of the hit (0..1) that shields can block */
+  function deal(target: Fighter, amount: number, shieldable: boolean | number, src: string, owner = -1, bonusPart = 0) {
     if (amount <= 0 || target.hp <= 0) return;
     let blocked = 0;
-    if (shieldable && target.shield > 0) {
-      blocked = Math.min(target.shield, amount);
+    const share = shieldable === true ? 1 : shieldable === false ? 0 : shieldable;
+    if (share > 0 && target.shield > 0) {
+      blocked = Math.min(target.shield, Math.round(amount * share));
       target.shield -= blocked;
     }
     target.hp -= amount - blocked;
@@ -214,12 +250,15 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
     const ctx: Ctx = {
       lv: inst.lv,
       v: (base) => Math.max(1, Math.round(base * lvScale(inst.lv) * power)),
+      vf: (base) => Math.max(1, Math.round(base * flatScale(inst.lv) * power)),
+      vs: (base) => Math.max(1, Math.round(base * steepScale(inst.lv) * power)),
       get me() { return view(f); },
       get foe() { return view(foe); },
       hit(n, pierce = false) {
         if (foe.hp <= 0 || f.hp <= 0) return;
         const mult = f.charge;
-        const dmg = Math.round((n + sum(f.growth) + bonusDmg) * mult);
+        let dmg = Math.round((n + sum(f.growth) + bonusDmg) * mult);
+        if (f.hooks.onHit) dmg = Math.max(0, Math.round(f.hooks.onHit(hookApi(f), dmg)));
         // credit for connect bonuses: the +damage bonus plus the share added by power bonuses
         const fromPower = blk.power > 1 ? n - n / blk.power : 0;
         const bonusPart = Math.round((bonusDmg + fromPower) * mult);
@@ -228,8 +267,10 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         if (mult > 1 && f.stats[f.chargeIdx]) f.stats[f.chargeIdx].bf += dmg - Math.round(dmg / mult);
         f.charge = 1;
         f.chargeIdx = -1;
-        deal(foe, dmg, !pierce, inst.id, blk.idx, bonusPart);
-        const th = sum(foe.thorns);
+        deal(foe, dmg, pierce === true ? false : pierce === false ? true : 1 - pierce, inst.id, blk.idx, bonusPart);
+        // thorns reflect at most THORNS_MAX of the hit (hooks can change it, e.g. a thorns hero reflects more)
+        let th = Math.min(sum(foe.thorns), Math.ceil(dmg * THORNS_MAX));
+        if (foe.hooks.thornsReflect) th = foe.hooks.thornsReflect(th, sum(foe.thorns), dmg);
         if (th > 0 && f.hp > 0) deal(f, th, true, 'thorns', foe.thorns[0]?.idx ?? -1);
       },
       shield(n) {
@@ -238,6 +279,8 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         emit({ type: 'shield', side: f.side, amount: n });
       },
       heal(n) {
+        // the enemy's thorns also wound: healing is halved while they have any
+        if (foe.thorns.length) n = Math.max(1, Math.round(n * THORNS_HEAL));
         const h = Math.min(n, f.maxHp - f.hp);
         if (h > 0) {
           f.hp += h;
@@ -245,13 +288,13 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
           emit({ type: 'heal', side: f.side, amount: h });
         }
       },
-      burn(dps, secs) { addBurn(foe, dps, secs, blk.idx); },
+      burn(dps, secs) { addBurn(foe, dps, f.hooks.burnSecs ? f.hooks.burnSecs(secs) : secs, blk.idx); },
       freeze(secs) {
         let ticks = secs * TPS;
         if (f.hooks.freezeTicks) ticks = f.hooks.freezeTicks(ticks);
         ticks *= Math.pow(FREEZE_DR, foe.freezeN); // diminishing returns (recovers over time)
         if (foe.steadfast) ticks *= 0.4;
-        ticks = Math.max(0, Math.min(MAX_FREEZE_TICKS, FREEZE_CAP - foe.frozenTotal, Math.round(ticks)));
+        ticks = Math.max(0, Math.min(MAX_FREEZE_TICKS, fCap - foe.frozenTotal, Math.round(ticks)));
         foe.freezeN++;
         if (ticks > foe.frozen) {
           foe.frozenTotal += ticks - foe.frozen;
@@ -260,11 +303,25 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         }
         emit({ type: 'status', side: foe.side, status: 'freeze', value: ticks });
       },
-      slow(pct, secs) {
+      slow(pct0, secs0) {
+        const [pct, secs] = f.hooks.slow ? f.hooks.slow(pct0, secs0) : [pct0, secs0];
         const p = Math.min(SLOW_CAP, foe.steadfast ? pct * 0.4 : pct);
         foe.slowPct = foe.slowT > 0 ? Math.max(foe.slowPct, p) : p;
         foe.slowT = Math.max(foe.slowT, secs * TPS);
         emit({ type: 'status', side: foe.side, status: 'slow', value: Math.round(p * 100) });
+      },
+      delay(secs) {
+        // cast delay: every enemy cooldown goes back. Diminishes with repeated use and shares the control cap with freeze.
+        let ticks = secs * TPS * Math.pow(FREEZE_DR, foe.delayN);
+        if (foe.steadfast) ticks *= 0.4;
+        ticks = Math.max(0, Math.min(fCap - foe.frozenTotal, Math.round(ticks)));
+        foe.delayN++;
+        if (ticks > 0) {
+          foe.frozenTotal += ticks;
+          st.fz += ticks;
+          for (const b of foe.blocks) b.prog = Math.max(0, b.prog - ticks);
+        }
+        emit({ type: 'status', side: foe.side, status: 'delay', value: ticks });
       },
       grow(n) {
         f.growth.push({ v: n, idx: blk.idx });
@@ -279,7 +336,7 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         emit({ type: 'status', side: f.side, status: 'charge', value: mult });
       },
       thorns(n) {
-        f.thorns.push({ v: n, idx: blk.idx });
+        f.thorns.push({ v: n, idx: blk.idx, ...(f.hooks.thornsPermanent ? {} : { until: t + THORNS_TICKS }) });
         emit({ type: 'status', side: f.side, status: 'thorns', value: sum(f.thorns) });
       },
       steadfast() {
@@ -290,14 +347,15 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         const g = Math.min(cap, sum(f.growth));
         const th = Math.min(cap, sum(f.thorns));
         if (g > 0) f.growth.push({ v: g, idx: blk.idx });
-        if (th > 0) f.thorns.push({ v: th, idx: blk.idx });
+        if (th > 0) f.thorns.push({ v: th, idx: blk.idx, ...(f.hooks.thornsPermanent ? {} : { until: t + THORNS_TICKS }) });
         if (f.charge > 1) f.charge = 1 + Math.min(cap, (f.charge - 1) * 2);
         emit({ type: 'status', side: f.side, status: 'amplify', value: g + th });
+        return g + th;
       },
       cleanse() {
         let n = 0;
-        if (f.burns.length) {
-          // remove the strongest burn stack
+        // remove the two strongest burn stacks
+        for (let r = 0; r < 2 && f.burns.length; r++) {
           let k = 0;
           f.burns.forEach((x, i) => { if (x.dps > f.burns[k].dps) k = i; });
           f.burns.splice(k, 1);
@@ -313,6 +371,9 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         if (foe.thorns.length) { foe.thorns.pop(); n++; }
         if (foe.charge > 1) { foe.charge = 1; foe.chargeIdx = -1; n++; }
         if (foe.steadfast) { foe.steadfast = false; n++; }
+        // shields are a buff too: strip part of them
+        const cut = Math.floor(foe.shield * DISPEL_SHIELD);
+        if (cut > 0) { foe.shield -= cut; n++; }
         emit({ type: 'status', side: foe.side, status: 'dispel', value: n });
       },
     };
@@ -409,6 +470,11 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
     for (const f of F) {
       if (f.slowT > 0) f.slowT--;
       if (t % FREEZE_DR_DECAY === 0 && f.freezeN > 0) f.freezeN--;
+      if (t % FREEZE_DR_DECAY === 0 && f.delayN > 0) f.delayN--;
+      if (f.thorns.some((x) => x.until !== undefined && x.until <= t)) {
+        f.thorns = f.thorns.filter((x) => x.until === undefined || x.until > t);
+        emit({ type: 'status', side: f.side, status: 'thorns', value: sum(f.thorns) });
+      }
     }
 
     if (t % TPS === 0) {
@@ -423,8 +489,8 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
       }
     }
 
-    if (t >= FATIGUE_START && (t - FATIGUE_START) % TPS === 0) {
-      const n = (t - FATIGUE_START) / TPS + 1;
+    if (t >= fStart && (t - fStart) % TPS === 0) {
+      const n = ((t - fStart) / TPS + 1) * fStep;
       emit({ type: 'fatigue', amount: n });
       for (const f of F) deal(f, n, false, 'fatigue');
     }

@@ -1,5 +1,6 @@
 import { Rng, hashSeed } from './rng';
 import { MAX_BONUS, MAX_H, MAX_W, findSpot, fits, rollBonus, rollOffer, type Offer } from './grid';
+import { HEROES } from './heroes';
 import { SKILLS, SKILL_LIST } from './skills';
 import type { Build, Mark, Rot, SkillInstance } from './types';
 
@@ -15,6 +16,24 @@ export const MAX_LV = 5;
 /** ตื่นพลัง (last chance) raises skills to this level */
 export const AWAKEN_LV = 3;
 export const BAG_MAX = 6;
+
+/** Heroes offered when a run starts (5 later with the pass). */
+export const HERO_CHOICES = 3;
+
+/**
+ * The heroes a run may start with: `n` heroes from different archetypes, rolled from the seed.
+ * Same seed → same choices, so the server can check the pick later (Phase 2).
+ */
+export function heroChoices(seed: number, n = HERO_CHOICES): string[] {
+  const rng = new Rng(hashSeed(seed, 'heroes'));
+  const arches = [...new Set(HEROES.map((h) => h.arch))];
+  const out: string[] = [];
+  while (out.length < n && arches.length) {
+    const arch = arches.splice(rng.int(arches.length), 1)[0];
+    out.push(rng.pick(HEROES.filter((h) => h.arch === arch)).id);
+  }
+  return out;
+}
 
 export type LastChanceOption = 'awaken' | 'mark' | 'supply';
 export const MARKS: Mark[] = ['burn', 'echo', 'quick', 'steadfast'];

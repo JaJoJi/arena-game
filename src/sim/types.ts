@@ -52,7 +52,8 @@ export type StatusKind =
   | 'rage' // side = self (hero passive)
   | 'amplify' // side = self
   | 'cleanse' // side = self, value = debuffs removed
-  | 'dispel'; // side = target, value = buffs removed
+  | 'dispel' // side = target, value = buffs removed
+  | 'delay'; // side = target, value = cooldown ticks pushed back (0 = resisted)
 
 /** Buffs and debuffs on one fighter right after an event (for the status UI). */
 export interface Fx {
@@ -89,7 +90,7 @@ export interface BlockStat {
   h: number;
   /** shield gained */
   sh: number;
-  /** freeze ticks applied to the enemy */
+  /** control ticks applied to the enemy (freeze + cooldown delay) */
   fz: number;
 }
 

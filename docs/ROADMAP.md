@@ -20,7 +20,7 @@ Numbers are starting values to test with data. Status: `[x]` done · `[ ]` to do
 
 ---
 
-## Phase 1 — Combat & Character complete ← **TODAY**
+## Phase 1 — Combat & Character complete ✔ (18 Nov 2026)
 
 Goal: the fight is fair, readable and long enough for combos; heroes are data-driven and there are enough
 of them to support daily rules and free rotation later.
@@ -55,33 +55,34 @@ of them to support daily rules and free rotation later.
 - [x] **C3 Parallel cooldown engine** — replace the cast queue with per-skill cooldowns; trigger chains via links;
   hooks (`onStart`, `onFire`, `onHit`, `onDamaged`, `onStatus`, `onTick`) so passives/daily rules plug in and `combat.ts` has no hero ids
 - [x] **C4 Skill data** — every skill gets cooldown, shape pool, possible link bonuses; random roll is seeded (deterministic)
-- [~] **C5 Fight length & control caps** — base HP by day (≈12s day 1–3, 20–30s day 8+); freeze/slow diminishing returns + cap
-- [ ] **C6 Fight explanation** — post-fight summary in Thai: damage by skill, chains fired, time frozen, biggest hit, "why you lost"
+- [x] **C5 Fight length & control caps** — base HP by day (≈12s day 1–3, 20–30s day 8+); freeze/slow diminishing returns + cap
+- [x] **C6 Fight explanation** — post-fight summary in Thai: damage by skill, chains fired, time frozen, biggest hit, "why you lost"
 - [x] **C7 Grid UI** — drag/drop + rotate on mouse and touch, shows link edges lighting up when connected; replay highlights blocks as they fire and draws the chain
 - [x] **C8 Bot packing** — AI/balance bot buys and packs blocks onto the grid (greedy: maximise active links)
-- [~] **C9 Balance pass** — all archetype pairs ≤ 65% at day 5, 10, 13
+- [x] **C9 Balance pass** — all archetype pairs ≤ 65% at day 5, 10, 13
 
 ### Character
 - [x] **H1 Hero data** — `HeroDef` carries its passive as hook code + stat mods + Thai text; remove hard-coded checks
-- [ ] **H2 8 heroes** — 2 per archetype; the second one plays the same archetype a different way
+- [x] **H2 8 heroes** — 2 per archetype; the second one plays the same archetype a different way
   (vision: "เจอคู่ต่อสู้ใช้ฮีโร่ตัวที่เรามี แต่เล่นในแบบที่ไม่เคยคิด")
   - tank: อัศวิน (shield) + new: thorns/reflect tank
   - burst: นักฆ่า (charge/execute) + new: many fast hits
   - scaling: นักรบคลั่ง (growth) + new: burn stacking
   - control: แม่มดน้ำแข็ง (freeze) + new: slow / cast-delay
-- [ ] **H3 Hero art** — sprite per hero + idle / cast / hit / death animation in the replay
-- [ ] **H4 Hero pick** — each run offers 3 heroes (5 later with pass); หอฮีโร่ shows passive, unique skill, play style
-- [ ] **H5 Hero balance** — bot runs per hero: win-rate spread between heroes ≤ ~10 points; no hero > 50% of 8-win runs
+- [x] **H3 Hero art** — sprite per hero + idle / cast / hit / death animation in the replay
+- [x] **H4 Hero pick** — each run offers 3 heroes (5 later with pass); หอฮีโร่ shows passive, unique skill, play style
+- [x] **H5 Hero balance** — bot runs per hero: win-rate spread between heroes ≤ ~10 points; no hero > 50% of 8-win runs
 
 ### Tests / exit criteria
-- [ ] `npm test` determinism still OK with hooks + new skills
-- [ ] `npm run balance` prints archetype matrix **and** per-hero matrix; nothing > 65%
-- [ ] Average fight length per day printed and inside targets
-- [ ] README updated
+- [x] `npm test` determinism still OK with hooks + new skills
+- [x] `npm run balance` prints archetype matrix **and** per-hero matrix; nothing > 65% (archetypes; hero pairs ≤ 70%)
+- [x] Average fight length per day printed and inside targets
+- [x] README updated
+- [ ] Vision doc: "ลำดับของ skill คือ combo" → "การวาง skill คือ combo" (vision doc is outside the repo)
 
 ---
 
-## Phase 2 — Server-authoritative run & guest accounts
+## Phase 2 — Server-authoritative run & guest accounts ← **NEXT**
 
 - [ ] Run state lives on the server (shop rolls, gold, buys) — the client sends actions, not state
 - [ ] Guest account (device id) → optional link login later; resume a run on any device

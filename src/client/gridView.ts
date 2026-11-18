@@ -39,6 +39,10 @@ const PATTERN: Record<string, string> = {
   gear: `<circle cx="5" cy="5" r="2.6" fill="none" stroke="${INK}" stroke-width="1.6"/><path d="M5 0.6 V2 M5 8 V9.4 M0.6 5 H2 M8 5 H9.4" stroke="${INK}" stroke-width="1.8"/>`,
   overclock: `<path d="M6 0.5 L2.8 5.4 H5.4 L4 9.5 L7.6 4.3 H5 Z" fill="#ffe066" stroke="${INK}" stroke-width=".5"/>`,
   shatter: `<path d="M0 3 L4 5 L3 10 M4 5 L10 4 M7 4.5 L8 0" fill="none" stroke="#ffffff" stroke-width="0.9"/>`,
+  spikewall: `<path d="M0 10 L2 6 L4 10 L6 6 L8 10 L10 6" fill="none" stroke="${INK}" stroke-width="1.2"/><rect x="0" y="0" width="10" height="3" fill="${INK}"/>`,
+  flurry: `<path d="M1 3 L9 1 M1 6 L9 4 M1 9 L9 7" stroke="${LIGHT}" stroke-width="1.1"/>`,
+  inferno: `<circle cx="5" cy="5" r="3.4" fill="rgba(255,90,20,.65)"/><circle cx="5" cy="5" r="1.4" fill="#fff2a0"/>`,
+  timewarp: `<circle cx="5" cy="5" r="3.6" fill="none" stroke="#ffffff" stroke-width="0.9"/><path d="M5 5 V2.4 M5 5 L3 6.5" stroke="#ffffff" stroke-width="0.9"/>`,
 };
 
 /** Put the pattern defs into the page once. */

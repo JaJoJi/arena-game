@@ -16,7 +16,9 @@ Production-style: `npm run build && npm start` → http://localhost:8787 (server
 | Command | What it does |
 |---|---|
 | `npm test` | 500 random fights, each simulated twice: must be identical (determinism) |
-| `npm run balance -- 80 10` | bots build 80 day-10 builds per archetype, prints the matchup matrix (target ≤ 65%) |
+| `npm run balance -- [builds=100] [days=5,10,13] [--strict] [--no-len]` | fight length per day (vs targets) + archetype and per-hero matchup matrices per day; `--strict` exits 1 on a miss |
+| `npm run runs -- [runs=150]` | bots play whole runs per hero vs same-day bot builds: share of 8-win runs, 8-win rate spread |
+| `npm run explain` | prints the Thai post-fight explanation for a few bot fights |
 | `npm run smoke` | against a running server: two players meet async, replay re-simulates identically, cheat build rejected |
 | `npm run typecheck` | TypeScript check |
 
@@ -26,9 +28,11 @@ Production-style: `npm run build && npm start` → http://localhost:8787 (server
 src/sim/      pure TypeScript, no DOM/Node APIs: runs on server AND browser
   combat.ts   simulate(buildA, buildB, seed, day) → events + per-skill stats (deterministic, 10 ticks/s)
               every placed skill runs its own cooldown in parallel; trigger bonuses + engines chain
+              HP by day (hpFor), fatigue start/step by day, freeze cap by day, SIM_VERSION
+  explain.ts  Thai post-fight explanation: how it ended, top skills, chains, control, biggest hit, why you lost
   grid.ts     shapes, rotation, placement, touch-based connect bonuses, seeded shop rolls
-  skills.ts   18 shared skills + 4 hero-unique skills
-  heroes.ts   4 heroes (one per archetype); passives are combat hooks
+  skills.ts   18 shared skills + 8 hero-unique skills
+  heroes.ts   8 heroes (two per archetype); passives are combat hooks (no hero ids in combat.ts)
   run.ts      one run: income, streaks, shop, slots, HP loss = day number, last chance
   bot.ts      rule-based bot (no LLM): AI opponents + balance testing
   rng.ts      seeded PRNG
@@ -52,10 +56,15 @@ A replay link stores builds and seed, and any client re-simulates the exact same
 - Grid (5×3 → 7×5, buyable to 8×6) with drag/drop, rotate (right-click / R), 6-slot backpack
 - Parallel cooldowns; connect bonuses (+damage, +shield, haste, power, ⚡ trigger) work when a matching
   block touches, any side; engines (ฟันเฟือง, เร่งเครื่อง); buff/debuff skills (ขยายพลัง, ชำระล้าง, สลายเวท)
-- 4 archetypes: tank (ถึก), burst (ดาเมจ), scaling (โตไม่หยุด), control (ควบคุม); freeze pauses all cooldowns
-  with diminishing returns and an 8s cap, ใจเหล็ก reduces control by 60%
+- 4 archetypes, 2 heroes each, each playing the archetype a different way:
+  tank อัศวิน (shield) / นักรบหนาม (permanent thorns) · burst นักฆ่า (charge/execute) / นักดาบคู่ (fast multi-hits) ·
+  scaling นักรบคลั่ง (growth) / นักเวทเพลิง (burn stacking) · control แม่มดน้ำแข็ง (freeze) / จอมเวทเวลา (slow + cast delay)
+- Each run offers 3 heroes from different archetypes (rolled from the run seed); หอฮีโร่ shows all 8 with play style
+- Freeze and cast delay share a control cap per fight (3s / 5s / 7s by day) with diminishing returns; ใจเหล็ก reduces control by 60%
+- Fight length by day: ≈10s on days 1–3, 15–17s on days 4–7, 20–23s on day 8+ (base HP table + day-based fatigue)
+- Thai post-fight explanation on the result and replay screens (why you lost and what to try)
 - Readable fights: buff/debuff chips, clock-wipe cooldowns per skill, You vs Enemy summary, hover tooltips
-- 32×32 pixel-art heroes drawn in code; concede button
+- 32×32 pixel-art heroes drawn in code with idle / cast / hit / death poses in the replay; concede button
 - Last chance (โอกาสสุดท้าย): first death → 1 HP + pick ตื่นพลัง / ตราวิญญาณ / เสบียงสุดท้าย
 - Async PvP: fight a saved build of the same day, closest rating within ±200, AI fills gaps and is labeled AI,
   defender loses nothing, full opponent build shown after the fight, shareable replay link
@@ -72,4 +81,10 @@ production needs server-side run state.
 
 ## Balance
 
-Being retuned after the grid / engine / Lv5 changes (`npm run balance -- 40 10`). Target: no archetype pair above 65%.
+Bots only (`npm run balance`, `npm run runs`), so treat it as a starting point for real-player data. Current state:
+
+- every archetype pair ≤ 65% on days 5, 10 and 13 (worst ≈ 60%); every hero pair ≤ 70% (designed counters,
+  e.g. นักรบหนาม vs นักดาบคู่)
+- best − worst hero overall win rate ≤ 15 points on every tested day
+- whole runs: no hero has more than ~14% of all 8-win runs; reach-8-wins rate within ≈10 points across heroes
+- average fight length per day inside the targets (printed by `npm run balance`)

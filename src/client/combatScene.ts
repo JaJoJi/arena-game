@@ -162,6 +162,8 @@ export class CombatScene extends Phaser.Scene {
     this.chips.forEach((row) => row.forEach((c) => c.setVisible(false)));
     this.nameTexts.forEach((t) => t.setText(''));
     this.fighters.forEach((f, i) => {
+      f.stop();
+      f.chain();
       f.setAngle(0).setAlpha(1).clearTint().setX(POS[i]);
       f.setVisible(false);
     });
@@ -229,6 +231,16 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
+  /** Short cast / hit pose, then back to the idle loop. Ignored once the fighter is down. */
+  private pose(side: number, kind: 'cast' | 'hit') {
+    const f = this.fighters[side];
+    const hero = this.builds[side]?.hero;
+    if (!hero || f.anims.currentAnim?.key === 'dead_' + hero) return;
+    if (kind === 'hit' && f.anims.currentAnim?.key === 'cast_' + hero && f.anims.isPlaying) return; // casting wins
+    f.chain();
+    f.play({ key: `${kind}_${hero}`, frameRate: Math.min(30, (kind === 'cast' ? 8 : 10) * Math.max(1, this.speed * 0.6)) }).chain('idle_' + hero);
+  }
+
   private dur(ms: number) {
     return ms / Math.max(1, this.speed * 0.6);
   }
@@ -261,6 +273,7 @@ export class CombatScene extends Phaser.Scene {
           this.tweens.killTweensOf(f);
           f.setX(POS[e.side]);
           this.tweens.add({ targets: f, x: POS[e.side] + dir * 26, duration: this.dur(90), yoyo: true });
+          this.pose(e.side, 'cast');
           const label = `${e.side === 0 ? '▶ ' : ''}${d.name} Lv${e.lv}${e.echo ? ' (ซ้ำ)' : ''}${e.side === 1 ? ' ◀' : ''}`;
           this.skillText.setText(label).setColor(SIDE_COLOR[e.side]).setAlpha(1).setScale(1);
           this.tweens.killTweensOf(this.skillText);
@@ -281,6 +294,7 @@ export class CombatScene extends Phaser.Scene {
         if (e.blocked > 0) this.float(e.side, `(${e.blocked})`, '#7fc8ff', 22);
         if (!this.quiet && e.amount > 0) {
           this.flashUntil[e.side] = this.time.now + 70;
+          if (e.src !== 'fatigue' && e.src !== 'burn') this.pose(e.side, 'hit');
           if (e.amount >= 10) this.cameras.main.shake(140, 0.008);
         }
         break;
@@ -304,8 +318,9 @@ export class CombatScene extends Phaser.Scene {
           amplify: [e.value > 0 ? 'บัฟ x2!' : 'ยังไม่มีบัฟ', '#ffd166'],
           cleanse: [e.value > 0 ? `ชำระล้าง ${e.value}` : 'ไม่มีดีบัฟ', '#aaffcc'],
           dispel: [e.value > 0 ? `สลายบัฟ ${e.value}!` : 'ไม่มีบัฟให้ลบ', '#c9a0ff'],
+          delay: [e.value > 0 ? `ถอยเวลา ${(e.value / 10).toFixed(1)} วิ` : 'ต้านได้', '#b8a0ff'],
         };
-        const [txt, col] = map[e.status];
+        const [txt, col] = map[e.status] ?? [e.status, '#ffffff'];
         this.float(e.side, txt, col, -24);
         if (e.status === 'freeze' && e.value > 0) this.frozenUntil[e.side] = e.t + e.value;
         break;
@@ -320,7 +335,10 @@ export class CombatScene extends Phaser.Scene {
         this.tweens.add({ targets: this.banner, scale: 1, duration: 250, ease: 'Back.Out' });
         ([0, 1] as Side[]).forEach((s) => {
           if (w !== -1 && s !== w) {
-            this.tweens.add({ targets: this.fighters[s], angle: s === 0 ? -90 : 90, alpha: 0.5, duration: 400 });
+            const f = this.fighters[s];
+            f.stop();
+            f.chain();
+            f.play('dead_' + this.builds[s].hero);
           }
         });
         break;

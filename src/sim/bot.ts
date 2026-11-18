@@ -1,6 +1,6 @@
-import { HEROES } from './heroes';
+import { HEROES, HEROES_BY_ID } from './heroes';
 import { Rng, hashSeed } from './rng';
-import { activeBonuses, fits, shapeSize } from './grid';
+import { DX, DY, cellsOf, footprint, matches, shapeSize } from './grid';
 import { MAX_LV, buy, gridOf, newRun, priceOf, reroll, toBuild, PRICE, REROLL, type RunState } from './run';
 import { SKILLS } from './skills';
 import { ARCHES, type Archetype, type Build, type Rot } from './types';
@@ -20,6 +20,7 @@ export interface BotRules {
 
 export function botShopTurn(s: RunState, rules: BotRules) {
   let rerolls = 0;
+  const want = HEROES_BY_ID[s.hero]?.botWant ?? [];
   for (let guard = 0; guard < 40; guard++) {
     let best = -1;
     let bestScore = 0;
@@ -39,6 +40,7 @@ export function botShopTurn(s: RunState, rules: BotRules) {
       const pi = rules.prefer.indexOf(d.arch as Archetype);
       if (pi >= 0) score += 3 - pi;
       if (d.hero) score += 3;
+      if (want.includes(id)) score += 2;
       if (score > bestScore) {
         bestScore = score;
         best = i;
@@ -67,27 +69,64 @@ export function arrange(s: RunState) {
     .map((k, i) => i)
     .sort((a, b) => shapeSize(s.skills[b].shape) - shapeSize(s.skills[a].shape) || a - b);
   for (const k of s.skills) Object.assign(k, { x: -1, y: -1 });
+  // occupancy of blocks placed so far (blocks are placed one by one, so this only grows)
+  const g = new Int16Array(w * h).fill(-1);
   for (const i of order) {
-    let best: { x: number; y: number; rot: Rot } | null = null;
+    const k = s.skills[i];
+    let best: { x: number; y: number; rot: Rot; cells: [number, number][] } | null = null;
     let bestScore = -Infinity;
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++)
-        for (let r = 0; r < 4; r++) {
-          const rot = r as Rot;
-          if (!fits(s.skills, w, h, i, x, y, rot)) continue;
-          const k = s.skills[i];
-          const old = { x: k.x, y: k.y, rot: k.rot };
-          Object.assign(k, { x, y, rot });
+    for (let r = 0; r < 4; r++) {
+      const rot = r as Rot;
+      const shape = cellsOf(k.shape, rot);
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const cells = shape.map(([cx, cy]) => [x + cx, y + cy] as [number, number]);
+          if (!cells.every(([cx, cy]) => cx < w && cy < h && g[cy * w + cx] === -1)) continue;
+          // touching placed blocks
+          const touch = new Set<number>();
+          for (const [cx, cy] of cells)
+            for (let d = 0; d < 4; d++) {
+              const nx = cx + DX[d];
+              const ny = cy + DY[d];
+              if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+              const j = g[ny * w + nx];
+              if (j >= 0) touch.add(j);
+            }
+          // only bonuses involving block i change: its own (any touching match) and each neighbour's (i matches)
           let score = -0.001 * (y * w + x);
-          for (const a of activeBonuses(s.skills, w, h)) if (a.from === i || a.to.includes(i)) score += BONUS_W[a.b.e];
-          Object.assign(k, old);
+          for (const b of k.bonus) if ([...touch].some((j) => matches(b.t, s.skills[j]))) score += BONUS_W[b.e];
+          for (const j of touch) {
+            const nb = s.skills[j];
+            for (const b of nb.bonus) {
+              if (!matches(b.t, k)) continue;
+              // only counts if no other neighbour of j already turns it on
+              if (!neighbourMatch(s, g, w, h, j, b.t)) score += BONUS_W[b.e];
+            }
+          }
           if (score > bestScore) {
             bestScore = score;
-            best = { x, y, rot };
+            best = { x, y, rot, cells };
           }
         }
-    if (best) Object.assign(s.skills[i], best);
+    }
+    if (best) {
+      Object.assign(k, { x: best.x, y: best.y, rot: best.rot });
+      for (const [cx, cy] of best.cells) g[cy * w + cx] = i;
+    }
   }
+}
+
+/** Does any block already touching placed block j match condition t? */
+function neighbourMatch(s: RunState, g: Int16Array, w: number, h: number, j: number, t: string) {
+  for (const [cx, cy] of footprint(s.skills[j]))
+    for (let d = 0; d < 4; d++) {
+      const nx = cx + DX[d];
+      const ny = cy + DY[d];
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const o = g[ny * w + nx];
+      if (o >= 0 && o !== j && matches(t, s.skills[o])) return true;
+    }
+  return false;
 }
 
 /** Build a bot's build as of `day`, by running its shop turns day by day. */
