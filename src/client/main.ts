@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { CombatScene, H, W, sceneReady } from './combatScene';
 import { TownScene, townReady } from './townScene';
+import { initTutorial } from './tutorial';
 import { startUI, type Stage } from './ui';
 import './style.css';
 
@@ -32,6 +33,7 @@ async function boot() {
     },
   };
   startUI(stage);
+  initTutorial();
 }
 
 void boot();
