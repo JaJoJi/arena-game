@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
-import { footprint } from '../sim/grid';
-import { SKILLS } from '../sim/skills';
+import { SKILLS, lvOf, nodeOf } from '../sim/skills';
 import type { Build, CombatEvent, CombatResult, CooldownTrace, Fx, Side } from '../sim/types';
 import { makeTextures } from './sprites';
 
@@ -32,7 +31,6 @@ export class CombatScene extends Phaser.Scene {
   private nameTexts!: Phaser.GameObjects.Text[];
   private hpTexts!: Phaser.GameObjects.Text[];
   private skillText!: Phaser.GameObjects.Text;
-  private comboText!: Phaser.GameObjects.Text;
   private clockText!: Phaser.GameObjects.Text;
   private banner!: Phaser.GameObjects.Text;
   /** buff / debuff chips under each HP bar */
@@ -46,7 +44,6 @@ export class CombatScene extends Phaser.Scene {
   private builds: Build[] = [];
   /** block idx → clock tick until which it glows */
   private glow: Map<number, number>[] = [new Map(), new Map()];
-  private chains: { side: number; from: number; to: number; until: number }[] = [];
   private maxHp: [number, number] = [40, 40];
   private hp: [number, number] = [40, 40];
   private sh: [number, number] = [0, 0];
@@ -80,7 +77,6 @@ export class CombatScene extends Phaser.Scene {
     this.nameTexts = [txt(145, 48, 16, SIDE_COLOR[0]), txt(495, 48, 16, SIDE_COLOR[1])];
     this.hpTexts = [txt(145, 24, 14), txt(495, 24, 14)];
     this.skillText = txt(W / 2, 100, 26);
-    this.comboText = txt(W / 2, 140, 22, '#ffe066');
     this.clockText = txt(W / 2, 24, 14, '#bbbbbb');
     this.banner = txt(W / 2, 170, 48);
     for (const s of [0, 1])
@@ -153,7 +149,6 @@ export class CombatScene extends Phaser.Scene {
     this.tweens.killAll();
     this.banner.setText('');
     this.skillText.setText('');
-    this.comboText.setText('');
     this.clockText.setText('');
     this.bars.clear();
     this.queue.clear();
@@ -185,7 +180,6 @@ export class CombatScene extends Phaser.Scene {
     this.fx = [...data.result.init.fx];
     this.fxT = [0, 0];
     this.glow = [new Map(), new Map()];
-    this.chains = [];
     this.frozenUntil = [0, 0];
     this.evs = data.result.events;
     this.trace = data.result.trace;
@@ -266,7 +260,6 @@ export class CombatScene extends Phaser.Scene {
       case 'cast': {
         const d = SKILLS[e.skill];
         this.glow[e.side].set(e.idx, e.t + 5);
-        if (e.from !== undefined) this.chains.push({ side: e.side, from: e.from, to: e.idx, until: e.t + 6 });
         if (!this.quiet) {
           const f = this.fighters[e.side];
           const dir = e.side === 0 ? 1 : -1;
@@ -274,17 +267,11 @@ export class CombatScene extends Phaser.Scene {
           f.setX(POS[e.side]);
           this.tweens.add({ targets: f, x: POS[e.side] + dir * 26, duration: this.dur(90), yoyo: true });
           this.pose(e.side, 'cast');
-          const label = `${e.side === 0 ? '▶ ' : ''}${d.name} Lv${e.lv}${e.echo ? ' (ซ้ำ)' : ''}${e.side === 1 ? ' ◀' : ''}`;
+          const inst = this.builds[e.side]?.skills[e.idx];
+          const label = `${e.side === 0 ? '▶ ' : ''}${inst ? nodeOf(inst).name : d.name} Lv${e.lv}${e.echo ? ' (ซ้ำ)' : ''}${e.side === 1 ? ' ◀' : ''}`;
           this.skillText.setText(label).setColor(SIDE_COLOR[e.side]).setAlpha(1).setScale(1);
           this.tweens.killTweensOf(this.skillText);
           this.tweens.add({ targets: this.skillText, alpha: 0, delay: this.dur(500), duration: this.dur(400) });
-          if (e.chain >= 1) {
-            this.comboText.setText(`⚡ เชน x${e.chain + 1}`).setColor(e.side === 0 ? '#ffe066' : '#ff9966').setAlpha(1).setScale(1.4 + 0.2 * e.chain);
-            this.tweens.killTweensOf(this.comboText);
-            this.tweens.add({ targets: this.comboText, scale: 1, duration: this.dur(200) });
-            this.tweens.add({ targets: this.comboText, alpha: 0, delay: this.dur(700), duration: this.dur(300) });
-            if (e.chain >= 2) this.cameras.main.shake(120, 0.003 * e.chain);
-          }
         }
         break;
       }
@@ -403,69 +390,41 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /**
-   * Each fighter's skill grid beside them. Every block is dimmed with a clock-wipe pie that fills
-   * clockwise as its cooldown runs; it flashes white when it fires, and the pies turn ice-blue while frozen.
-   * Chain / engine fires draw a short yellow line between the blocks.
+   * Each fighter's skill list beside them, top to bottom: a colour chip per skill and a cooldown bar
+   * that fills as the cooldown runs. A skill flashes white when it fires; bars turn ice-blue while frozen.
    */
   private drawQueue() {
     const g = this.queue.clear();
-    const c = 14;
+    const rowH = 13;
+    const barW = 54;
     const tick = Math.max(0, Math.min(this.lastTick, Math.floor(this.clock)));
     for (const s of [0, 1]) {
       const b = this.builds[s];
-      if (!b) continue;
-      const ox = s === 0 ? 12 : W - 12 - b.w * c;
-      const oy = GROUND - 8 - b.h * c;
-      g.fillStyle(0x0b0e13, 0.82).fillRoundedRect(ox - 4, oy - 4, b.w * c + 8, b.h * c + 8, 4);
-      g.lineStyle(1, 0x3a424d).strokeRoundedRect(ox - 4, oy - 4, b.w * c + 8, b.h * c + 8, 4);
+      if (!b || !b.skills.length) continue;
+      const n = b.skills.length;
+      const w = 14 + barW;
+      const ox = s === 0 ? 12 : W - 12 - w;
+      const oy = GROUND - 8 - n * rowH;
+      g.fillStyle(0x0b0e13, 0.82).fillRoundedRect(ox - 4, oy - 4, w + 8, n * rowH + 6, 4);
+      g.lineStyle(1, 0x3a424d).strokeRoundedRect(ox - 4, oy - 4, w + 8, n * rowH + 6, 4);
       const frozen = this.trace ? this.trace.fr[s][tick] === 1 : false;
-      const centers: [number, number][] = [];
       b.skills.forEach((k, i) => {
-        const cells = footprint(k);
+        const y = oy + i * rowH;
         const color = ARCH_COLOR[SKILLS[k.id]?.arch ?? 'none'];
         const lit = (this.glow[s].get(i) ?? -1) >= this.clock;
-        g.fillStyle(lit ? 0xffffff : color, lit ? 0.95 : 0.32);
-        for (const [x, y] of cells) g.fillRect(ox + x * c, oy + y * c, c - 1, c - 1);
-        // pie centre: middle of a full rectangle, else the cell nearest the middle
-        const xs = cells.map((p) => p[0]);
-        const ys = cells.map((p) => p[1]);
-        const bw = Math.max(...xs) - Math.min(...xs) + 1;
-        const bh = Math.max(...ys) - Math.min(...ys) + 1;
-        const mx = xs.reduce((n, v) => n + v, 0) / cells.length;
-        const my = ys.reduce((n, v) => n + v, 0) / cells.length;
-        let cx: number;
-        let cy: number;
-        let r: number;
-        if (cells.length === bw * bh) {
-          cx = ox + (mx + 0.5) * c;
-          cy = oy + (my + 0.5) * c;
-          r = Math.min(bw, bh) * c * 0.4;
-        } else {
-          const near = cells.reduce((best, p) => (Math.hypot(p[0] - mx, p[1] - my) < Math.hypot(best[0] - mx, best[1] - my) ? p : best));
-          cx = ox + (near[0] + 0.5) * c;
-          cy = oy + (near[1] + 0.5) * c;
-          r = c * 0.42;
-        }
-        centers[i] = [cx, cy];
-        if (!this.trace || lit) return;
-        const ratio = this.trace.p[s][tick * this.trace.n[s] + i] / 255;
-        g.fillStyle(0x000000, 0.6).fillCircle(cx, cy, r);
+        g.fillStyle(lit ? 0xffffff : color, 1).fillRect(ox, y, 10, 10);
+        // level pips under the chip
+        g.fillStyle(0xffffff, 0.85);
+        for (let l = 0; l < lvOf(k.v); l++) g.fillRect(ox + l * 3, y + 10, 2, 1);
+        const bx = ox + 14;
+        g.fillStyle(0x000000, 0.6).fillRect(bx, y + 2, barW, 6);
+        const ratio = lit ? 1 : this.trace ? this.trace.p[s][tick * this.trace.n[s] + i] / 255 : 0;
         if (ratio > 0.01) {
-          g.fillStyle(frozen && k.mark !== 'steadfast' ? 0x8fd8ff : ratio > 0.9 ? 0xffffff : color, 1);
-          g.beginPath();
-          g.slice(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + ratio * Math.PI * 2, false);
-          g.closePath();
-          g.fillPath();
+          g.fillStyle(lit ? 0xffffff : frozen && k.mark !== 'steadfast' ? 0x8fd8ff : ratio > 0.9 ? 0xffffff : color, 1);
+          g.fillRect(bx, y + 2, Math.round(barW * ratio), 6);
         }
       });
-      if (frozen) {
-        g.lineStyle(2, 0x8fd8ff, 0.9).strokeRect(ox - 2, oy - 2, b.w * c + 4, b.h * c + 4);
-      }
-      this.chains = this.chains.filter((l) => l.until >= this.clock);
-      for (const l of this.chains) {
-        if (l.side !== s || !centers[l.from] || !centers[l.to]) continue;
-        g.lineStyle(2, 0xffe066).lineBetween(...centers[l.from], ...centers[l.to]);
-      }
+      if (frozen) g.lineStyle(2, 0x8fd8ff, 0.9).strokeRect(ox - 2, oy - 2, w + 4, n * rowH + 2);
     }
   }
 }

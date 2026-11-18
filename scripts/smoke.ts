@@ -10,10 +10,9 @@ const post = async (body: unknown) => {
   return { status: r.status, json: (await r.json()) as any };
 };
 
-const blk = (id: string, shape: string, x: number, y: number) =>
-  ({ id, lv: 1, shape, rot: 0, x, y, bonus: [{ t: 'arch:burst', e: 'trigger' }] }) as Build['skills'][number];
-const buildA: Build = { hero: 'knight', w: 5, h: 3, skills: [blk('shield', 'o4', 0, 0), blk('strike', 'i3', 2, 0)] };
-const buildB: Build = { hero: 'witch', w: 5, h: 3, skills: [blk('frost', 'i2', 0, 0), blk('shatter', 'i3', 2, 0)] };
+const blk = (id: string) => ({ id, v: '' });
+const buildA: Build = { hero: 'knight', skills: [blk('shield'), blk('strike')] };
+const buildB: Build = { hero: 'witch', skills: [blk('frost'), blk('shatter')] };
 const tag = Date.now().toString(36);
 
 const a = await post({ runId: 'smoke-a-' + tag, name: 'SmokeA', day: 1, rating: 1000, build: buildA });
@@ -26,6 +25,6 @@ const local = simulate(rep.a.build, rep.b.build, rep.seed, rep.day);
 const same = JSON.stringify(local) === JSON.stringify(b.json.result);
 console.log('replay', b.json.fightId, 're-simulated locally matches server:', same);
 
-const bad = await post({ runId: 'x', day: 1, build: { hero: 'knight', w: 5, h: 3, skills: [blk('shatter', 'i3', 0, 0)] } });
+const bad = await post({ runId: 'x', day: 1, build: { hero: 'knight', skills: [blk('shatter')] } });
 console.log('cheat build (witch skill on knight) rejected:', bad.status === 400, bad.json.error);
 process.exitCode = same && bad.status === 400 ? 0 : 1;

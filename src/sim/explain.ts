@@ -1,5 +1,5 @@
 import { TPS, fatigueStart } from './combat';
-import { SKILLS } from './skills';
+import { SKILLS, nodeOf } from './skills';
 import type { Build, CombatResult, Side } from './types';
 
 /**
@@ -9,7 +9,7 @@ import type { Build, CombatResult, Side } from './types';
 export interface Explanation {
   /** one line: who won, how and when */
   headline: string;
-  /** short facts: top damage, chains, control, biggest hit */
+  /** short facts: top damage, control, biggest hit, skill fires */
   facts: string[];
   /** why `me` lost (or won), most important first, each with what to try */
   reasons: string[];
@@ -29,8 +29,8 @@ interface SideTotals {
   /** biggest single hit dealt */
   bigHit: number;
   bigHitSrc: string;
-  chains: number;
-  longestChain: number;
+  /** skill fires (echo repeats not counted) */
+  casts: number;
   /** growth reached (พลังโจมตี) */
   growth: number;
 }
@@ -42,7 +42,7 @@ const skillName = (id: string) => (id === 'thorns' ? 'หนาม' : id === 'bu
 function totals(r: CombatResult): [SideTotals, SideTotals] {
   const t = [0, 1].map(() => ({
     dealt: 0, blockedByFoe: 0, thornsTaken: 0, burnTaken: 0, fatigueTaken: 0, healed: 0, shielded: 0,
-    bigHit: 0, bigHitSrc: '', chains: 0, longestChain: 0, growth: 0,
+    bigHit: 0, bigHitSrc: '', casts: 0, growth: 0,
   })) as [SideTotals, SideTotals];
   for (const e of r.events) {
     if (e.type === 'damage') {
@@ -61,10 +61,7 @@ function totals(r: CombatResult): [SideTotals, SideTotals] {
       }
     } else if (e.type === 'heal') t[e.side].healed += e.amount;
     else if (e.type === 'shield') t[e.side].shielded += e.amount;
-    else if (e.type === 'cast' && e.chain > 0 && !e.echo) {
-      t[e.side].chains++;
-      t[e.side].longestChain = Math.max(t[e.side].longestChain, e.chain + 1);
-    }
+    else if (e.type === 'cast' && !e.echo) t[e.side].casts++;
   }
   const last = r.events.at(-1);
   if (last) for (const s of [0, 1] as Side[]) t[s].growth = last.s.fx[s].g;
@@ -81,7 +78,7 @@ function topBlock(r: CombatResult, b: Build, s: Side): [string, number, number] 
     if (best < 0 || x.d > st[best].d) best = i;
   });
   if (best < 0 || st[best].d <= 0) return null;
-  return [b.skills[best].id, st[best].d, pct(st[best].d, total)];
+  return [nodeOf(b.skills[best]).name, st[best].d, pct(st[best].d, total)];
 }
 
 /**
@@ -112,10 +109,9 @@ export function explain(r: CombatResult, builds: [Build, Build], me: Side = 0, n
   const mt = topBlock(r, builds[me], me);
   const ft = topBlock(r, builds[foe], foe);
   facts.push(`ดาเมจรวม: ${names[me]} ${my.dealt} · ${names[foe]} ${their.dealt}`);
-  if (mt) facts.push(`skill ที่ทำดาเมจมากสุดของ${names[me]}: ${skillName(mt[0])} ${mt[1]} (${mt[2]}%)`);
-  if (ft) facts.push(`skill ที่ทำดาเมจมากสุดของ${names[foe]}: ${skillName(ft[0])} ${ft[1]} (${ft[2]}%)`);
-  if (my.chains || their.chains)
-    facts.push(`เชน: ${names[me]} ${my.chains} ครั้ง (ยาวสุด x${my.longestChain || 1}) · ${names[foe]} ${their.chains} ครั้ง (ยาวสุด x${their.longestChain || 1})`);
+  if (mt) facts.push(`skill ที่ทำดาเมจมากสุดของ${names[me]}: ${mt[0]} ${mt[1]} (${mt[2]}%)`);
+  if (ft) facts.push(`skill ที่ทำดาเมจมากสุดของ${names[foe]}: ${ft[0]} ${ft[1]} (${ft[2]}%)`);
+  facts.push(`ใช้ skill: ${names[me]} ${my.casts} ครั้ง · ${names[foe]} ${their.casts} ครั้ง`);
   const myCtl = r.stats[foe].reduce((n, x) => n + x.fz, 0); // control applied TO me
   const theirCtl = r.stats[me].reduce((n, x) => n + x.fz, 0);
   if (myCtl || theirCtl) facts.push(`โดนควบคุม (แช่แข็ง/ถ่วงเวลา): ${names[me]} ${sec(myCtl)} วิ · ${names[foe]} ${sec(theirCtl)} วิ`);
@@ -125,13 +121,13 @@ export function explain(r: CombatResult, builds: [Build, Build], me: Side = 0, n
   // ---------- reasons (scored, highest first) ----------
   const out: [number, string][] = [];
   const add = (score: number, text: string) => score > 0 && out.push([score, text]);
-  const myPlaced = builds[me].skills.filter((k) => k.x >= 0);
+  const mySkills = builds[me].skills;
   if (!won) {
     const lostHp = r.maxHp[me];
     if (pct(myCtl, len) >= 20)
       add(pct(myCtl, len), `คุณโดนแช่แข็ง/ถ่วงเวลา ${sec(myCtl)} วิ (${pct(myCtl, len)}% ของการสู้) skill ของคุณแทบไม่ได้ออก → ลอง ใจเหล็ก (ลดการควบคุม 60%) หรือ ชำระล้าง (ลบการแช่แข็ง)`);
     if (pct(my.blockedByFoe, my.dealt) >= 30)
-      add(pct(my.blockedByFoe, my.dealt), `โล่ของศัตรูกันดาเมจคุณไป ${my.blockedByFoe} (${pct(my.blockedByFoe, my.dealt)}%) → ทุบหนัก (ทะลุโล่ครึ่งหนึ่ง), จุดไฟ (ไม่สนโล่) หรือ สลายเวท (ลบโล่ 30%)`);
+      add(pct(my.blockedByFoe, my.dealt), `โล่ของศัตรูกันดาเมจคุณไป ${my.blockedByFoe} (${pct(my.blockedByFoe, my.dealt)}%) → ทุบหนัก (ทะลุโล่ครึ่งหนึ่ง), จุดไฟ (ไม่สนโล่) หรือ สลายเวท (ลบโล่ 20%)`);
     if (pct(my.thornsTaken, lostHp) >= 15)
       add(pct(my.thornsTaken, lostHp), `หนามของศัตรูสะท้อนใส่คุณ ${my.thornsTaken} → ตีน้อยครั้งแต่แรง (ทุบหนัก) แทนการตีรัว หรือ สลายเวท ลบหนาม`);
     if (pct(their.healed, my.dealt) >= 20)
@@ -142,15 +138,15 @@ export function explain(r: CombatResult, builds: [Build, Build], me: Side = 0, n
       add(their.growth * 3, `ศัตรูสะสมพลังโจมตีได้ถึง +${their.growth} ต่อการตี (ของคุณ +${my.growth}) ยิ่งนานยิ่งแรง → สลายเวท ลบพลังโจมตี หรือทำดาเมจให้จบก่อนศัตรูโต`);
     if (fatigued && my.dealt < their.dealt)
       add(30, `สู้กันยืดเยื้อจนเหนื่อยล้า ศัตรูทำดาเมจได้มากกว่า (${their.dealt} ต่อ ${my.dealt}) → เพิ่ม skill ที่ตีได้ หรือเลเวลอัป skill หลัก`);
-    if (their.longestChain >= 3 && their.chains > my.chains * 2)
-      add(their.chains * 2, `ศัตรูต่อเชนได้ ${their.chains} ครั้ง (ยาวสุด x${their.longestChain}) → จัดบล็อกของคุณให้โบนัสเชื่อมต่อ (⚡) ติดกันมากขึ้น`);
+    if (their.casts > my.casts * 1.6 && their.casts >= 8)
+      add(Math.round((their.casts / Math.max(1, my.casts)) * 10), `ศัตรูใช้ skill ถี่กว่ามาก (${their.casts} ต่อ ${my.casts} ครั้ง) → skill คูลดาวน์สั้น ตราร่ายไว หรือลมหนาว/แช่แข็งให้ศัตรูช้าลง`);
     if (!out.length) add(1, `ศัตรูทำดาเมจได้มากกว่า (${their.dealt} ต่อ ${my.dealt}) → อัปเลเวล skill ที่ทำดาเมจมากสุด หรือขยายตารางเพื่อวางเพิ่ม`);
   } else {
     if (pct(theirCtl, len) >= 20) add(pct(theirCtl, len), `คุณควบคุมศัตรูได้ ${sec(theirCtl)} วิ (${pct(theirCtl, len)}% ของการสู้)`);
-    if (my.longestChain >= 3) add(my.chains * 2, `เชนของคุณทำงาน ${my.chains} ครั้ง (ยาวสุด x${my.longestChain})`);
+    if (my.casts > their.casts * 1.6 && my.casts >= 8) add(Math.round((my.casts / Math.max(1, their.casts)) * 10), `คุณใช้ skill ถี่กว่ามาก (${my.casts} ต่อ ${their.casts} ครั้ง)`);
     if (pct(their.thornsTaken, r.maxHp[foe]) >= 15) add(pct(their.thornsTaken, r.maxHp[foe]), `หนามของคุณสะท้อนใส่ศัตรู ${their.thornsTaken}`);
     if (my.growth >= 8) add(my.growth * 2, `คุณสะสมพลังโจมตีได้ถึง +${my.growth} ต่อการตี`);
-    if (mt && mt[2] >= 40) add(mt[2], `${skillName(mt[0])} ของคุณทำดาเมจ ${mt[2]}% ของทั้งหมด`);
+    if (mt && mt[2] >= 40) add(mt[2], `${mt[0]} ของคุณทำดาเมจ ${mt[2]}% ของทั้งหมด`);
     if (!out.length) {
       if (my.dealt >= their.dealt) add(1, `คุณทำดาเมจได้มากกว่า (${my.dealt} ต่อ ${their.dealt})`);
       else if (fatigued) add(1, `คุณอึดกว่าในช่วงเหนื่อยล้า (โล่ ${my.shielded} ฟื้นเลือด ${my.healed}) แม้ทำดาเมจน้อยกว่า (${my.dealt} ต่อ ${their.dealt}) → เพิ่ม skill ที่ตีได้ จะชนะง่ายขึ้น`);
@@ -158,15 +154,11 @@ export function explain(r: CombatResult, builds: [Build, Build], me: Side = 0, n
     }
   }
   // blocks that never fired (both results): worth knowing
-  const idle = myPlaced.filter((k) => {
-    const i = builds[me].skills.indexOf(k);
-    const st = r.stats[me][i];
-    return st && st.c + st.tc === 0;
-  });
-  if (idle.length && !won) add(5, `skill ที่ไม่ได้ทำงานเลยในการสู้นี้: ${idle.map((k) => SKILLS[k.id]?.name ?? k.id).join(', ')} (คูลดาวน์ยาวกว่าการสู้)`);
-  const bonusDmg = r.stats[me].reduce((n, x) => n + x.bd, 0);
-  if (!won && myPlaced.length >= 4 && pct(bonusDmg, my.dealt) < 5)
-    add(4, `โบนัสเชื่อมต่อแทบไม่ช่วยดาเมจ (${pct(bonusDmg, my.dealt)}%) → วางบล็อกให้ตรงเงื่อนไขของกันและกัน (บล็อกที่ติดโบนัสจะเรืองแสง)`);
+  const idle = mySkills.filter((_, i) => r.stats[me][i] && r.stats[me][i].c === 0);
+  if (idle.length && !won) add(5, `skill ที่ไม่ได้ทำงานเลยในการสู้นี้: ${idle.map((k) => nodeOf(k).name).join(', ')} (คูลดาวน์ยาวกว่าการสู้)`);
+  const hitters = mySkills.filter((_, i) => (r.stats[me][i]?.d ?? 0) > 0).length;
+  if (!won && mySkills.length >= 3 && hitters <= 1)
+    add(8, `มีแค่ ${hitters} skill ที่ทำดาเมจ → เพิ่ม skill โจมตีอีกสักตัว (หรือให้ skill ที่มีอยู่เลเวลสูงขึ้น)`);
 
   out.sort((a, b) => b[0] - a[0]);
   return { headline, facts, reasons: out.slice(0, 3).map((x) => x[1]) };

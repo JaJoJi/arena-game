@@ -6,11 +6,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, s
 import { join, extname, resolve, normalize } from 'node:path';
 import { randomInt, randomUUID } from 'node:crypto';
 import { SIM_VERSION, simulate } from '../sim/combat';
-import { BONUS_KINDS, MAX_BONUS, MAX_H, MAX_W, isShape, occupancy, validTarget } from '../sim/grid';
 import { randomAiBuild } from '../sim/bot';
 import { HEROES_BY_ID } from '../sim/heroes';
-import { SKILLS } from '../sim/skills';
-import { MAX_LV } from '../sim/run';
+import { SKILLS, isVariant } from '../sim/skills';
+import { MAX_SLOTS, slotsFor } from '../sim/run';
 import type { Build, Mark } from '../sim/types';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -73,30 +72,22 @@ function save() {
 }
 
 const MARKS: Mark[] = ['burn', 'echo', 'quick', 'steadfast'];
-function validateBuild(x: unknown): Build | string {
+/** Builds come from the client (Phase 2 moves run state to the server): check everything that can be checked. */
+function validateBuild(x: unknown, day: number): Build | string {
   const b = x as Build;
   if (!b || typeof b !== 'object' || !HEROES_BY_ID[b.hero]) return 'bad hero';
-  if (!Number.isInteger(b.w) || !Number.isInteger(b.h) || b.w < 1 || b.h < 1 || b.w > MAX_W || b.h > MAX_H) return 'bad grid';
-  if (!Array.isArray(b.skills) || b.skills.length > b.w * b.h) return 'bad skills';
+  // bought slots can add more than the day gives, but never past MAX_SLOTS
+  if (!Array.isArray(b.skills) || b.skills.length > MAX_SLOTS || b.skills.length > slotsFor(day, MAX_SLOTS)) return 'bad skills';
   const skills = [];
   for (const s of b.skills) {
     if (!SKILLS[s?.id]) return 'unknown skill';
     if (SKILLS[s.id].hero && SKILLS[s.id].hero !== b.hero) return 'skill not allowed for hero';
-    if (!Number.isInteger(s.lv) || s.lv < 1 || s.lv > MAX_LV) return 'bad level';
+    if (!isVariant(s.v)) return 'bad level';
     if (s.mark !== undefined && !MARKS.includes(s.mark)) return 'bad mark';
-    if (!isShape(s.shape) || !SKILLS[s.id].shapes.includes(s.shape)) return 'bad shape';
-    if (![0, 1, 2, 3].includes(s.rot) || !Number.isInteger(s.x) || !Number.isInteger(s.y) || s.x < 0 || s.y < 0) return 'bad position';
-    if (!Array.isArray(s.bonus) || s.bonus.length > MAX_BONUS) return 'bad bonus';
-    for (const x of s.bonus) if (!BONUS_KINDS.includes(x?.e) || !validTarget(String(x?.t), b.hero)) return 'bad bonus';
-    skills.push({
-      id: s.id, lv: s.lv, ...(s.mark ? { mark: s.mark } : {}), shape: s.shape, rot: s.rot, x: s.x, y: s.y,
-      bonus: s.bonus.map((x) => ({ t: String(x.t), e: x.e })),
-    });
+    skills.push({ id: s.id, v: s.v, ...(s.mark ? { mark: s.mark } : {}) });
   }
   if (new Set(skills.map((s) => s.id)).size !== skills.length) return 'duplicate skill';
-  const build: Build = { hero: b.hero, w: b.w, h: b.h, skills };
-  if (typeof occupancy(build.skills, build.w, build.h) === 'string') return 'bad placement';
-  return build;
+  return { hero: b.hero, skills };
 }
 
 const expected = (ra: number, rb: number) => 1 / (1 + Math.pow(10, (rb - ra) / 400));
@@ -107,7 +98,7 @@ function handleFight(body: any) {
   const day = Number(body?.day);
   const rating = Number.isFinite(body?.rating) ? Number(body.rating) : 1000;
   if (!runId || !Number.isInteger(day) || day < 1 || day > 20) return { status: 400, json: { error: 'bad request' } };
-  const build = validateBuild(body?.build);
+  const build = validateBuild(body?.build, day);
   if (typeof build === 'string') return { status: 400, json: { error: build } };
 
   // Matchmaking: same day of the run, closest build rating, within a window. No counter-picking.

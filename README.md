@@ -1,7 +1,7 @@
 # Arena POC (ชื่อชั่วคราว)
 
-Proof of concept for the async auto-battler in the vision doc: pick a hero, buy skill blocks day by day,
-pack them into a grid (placement is the combo), fight other players' saved builds from the same day,
+Proof of concept for the async auto-battler in the vision doc: pick a hero, buy skills day by day into a
+vertical skill list (every skill runs its own cooldown in parallel), fight other players' saved builds from the same day,
 win 8 before HP 20 runs out. Full combat design: see the combat doc and `docs/ROADMAP.md`.
 
 ## Run
@@ -27,11 +27,11 @@ Production-style: `npm run build && npm start` → http://localhost:8787 (server
 ```
 src/sim/      pure TypeScript, no DOM/Node APIs: runs on server AND browser
   combat.ts   simulate(buildA, buildB, seed, day) → events + per-skill stats (deterministic, 10 ticks/s)
-              every placed skill runs its own cooldown in parallel; trigger bonuses + engines chain
+              every equipped skill runs its own cooldown in parallel; skills don't interact by position
               HP by day (hpFor), fatigue start/step by day, freeze cap by day, SIM_VERSION
-  explain.ts  Thai post-fight explanation: how it ended, top skills, chains, control, biggest hit, why you lost
-  grid.ts     shapes, rotation, placement, touch-based connect bonuses, seeded shop rolls
-  skills.ts   18 shared skills + 8 hero-unique skills
+  explain.ts  Thai post-fight explanation: how it ended, top skills, skill fires, control, biggest hit, why you lost
+  skills.ts   16 shared + 8 hero-unique skills as data: each a tree (Lv1 → 2 Lv2 → 2 Lv3 variants) of effects,
+              keyword icons + chips for the UI (design: docs/SKILL_TREE.md)
   heroes.ts   8 heroes (two per archetype); passives are combat hooks (no hero ids in combat.ts)
   run.ts      one run: income, streaks, shop, slots, HP loss = day number, last chance
   bot.ts      rule-based bot (no LLM): AI opponents + balance testing
@@ -51,11 +51,11 @@ A replay link stores builds and seed, and any client re-simulates the exact same
 ## What's in the POC (from the vision doc)
 
 - Run loop: 20 HP, lose HP = day number, 8 wins ends run, win-streak bonus > loss-streak comeback money
-- Shop: 3 random skill blocks (shape + 1–2 connect bonuses rolled per copy), reroll, buy grid space,
-  buy duplicate = level up (max Lv5, +1 bonus)
-- Grid (5×3 → 7×5, buyable to 8×6) with drag/drop, rotate (right-click / R), 6-slot backpack
-- Parallel cooldowns; connect bonuses (+damage, +shield, haste, power, ⚡ trigger) work when a matching
-  block touches, any side; engines (ฟันเฟือง, เร่งเครื่อง); buff/debuff skills (ขยายพลัง, ชำระล้าง, สลายเวท)
+- Day 1: a fixed 5-skill shop per hero (same every run) and 7 gold for two buys; random shops from day 2
+- Shop: 5 offers (new Lv1 skills + random next-variant upgrades of skills you own), reroll, +1 skill slot;
+  Lv1 3 gold, Lv2 upgrade 4, Lv3 upgrade 5 (hero skills +1); max Lv3
+- Skill list: 3 slots on day 1, +1 every 3 days up to 6, buyable up to 8; move up/down, sell; no backpack
+- Parallel cooldowns; buff/debuff skills (ขยายพลัง, ชำระล้าง, สลายเวท); 16 shared skills + 8 hero uniques
 - 4 archetypes, 2 heroes each, each playing the archetype a different way:
   tank อัศวิน (shield) / นักรบหนาม (permanent thorns) · burst นักฆ่า (charge/execute) / นักดาบคู่ (fast multi-hits) ·
   scaling นักรบคลั่ง (growth) / นักเวทเพลิง (burn stacking) · control แม่มดน้ำแข็ง (freeze) / จอมเวทเวลา (slow + cast delay)
@@ -63,7 +63,9 @@ A replay link stores builds and seed, and any client re-simulates the exact same
 - Freeze and cast delay share a control cap per fight (3s / 5s / 7s by day) with diminishing returns; ใจเหล็ก reduces control by 60%
 - Fight length by day: ≈10s on days 1–3, 15–17s on days 4–7, 20–23s on day 8+ (base HP table + day-based fatigue)
 - Thai post-fight explanation on the result and replay screens (why you lost and what to try)
-- Readable fights: buff/debuff chips, clock-wipe cooldowns per skill, You vs Enemy summary, hover tooltips
+- Readable fights: skills shown as icon + number chips (hover / tap a chip explains its keyword), buff/debuff chips,
+  cooldown bars per skill, You vs Enemy summary
+- Fights end by KO: fatigue ends 7–17% of fights on every day (target ≤ 20%)
 - 32×32 pixel-art heroes drawn in code with idle / cast / hit / death poses in the replay; concede button
 - Last chance (โอกาสสุดท้าย): first death → 1 HP + pick ตื่นพลัง / ตราวิญญาณ / เสบียงสุดท้าย
 - Async PvP: fight a saved build of the same day, closest rating within ±200, AI fills gaps and is labeled AI,
@@ -83,7 +85,7 @@ production needs server-side run state.
 
 Bots only (`npm run balance`, `npm run runs`), so treat it as a starting point for real-player data. Current state:
 
-- every archetype pair ≤ 65% on days 5, 10 and 13 (worst ≈ 60%); every hero pair ≤ 70% (designed counters,
+- every archetype pair ≤ 65% on days 5, 10 and 13 (worst ≈ 64%); every hero pair ≤ ~70% (designed counters,
   e.g. นักรบหนาม vs นักดาบคู่)
 - best − worst hero overall win rate ≤ 15 points on every tested day
 - whole runs: no hero has more than ~14% of all 8-win runs; reach-8-wins rate within ≈10 points across heroes

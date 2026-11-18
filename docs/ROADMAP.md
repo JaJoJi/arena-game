@@ -25,40 +25,35 @@ Numbers are starting values to test with data. Status: `[x]` done · `[ ]` to do
 Goal: the fight is fair, readable and long enough for combos; heroes are data-driven and there are enough
 of them to support daily rules and free rotation later.
 
-> **Design change (17 Nov 2026):** the skill row and "order = combo" are replaced by a **skill grid**
-> (inventory-style packing). This updates the vision's TCG section ("ลำดับของ skill คือ combo" →
-> "การวาง skill คือ combo"); per principle 10, the vision doc should be updated to match.
+> **Design change (18 Nov 2026):** the skill grid (17 Nov) is removed. Skills are a **vertical list**; every skill
+> runs its own cooldown **in parallel** and fires when ready. Skills do not connect or interact by position
+> (no shapes, no connect bonuses, no chains, no engines). The grid version is kept on branch `phase1-combat-character`.
+> Per principle 10, the vision doc's TCG section should say: skills fire on their own cooldowns, all at once
+> (not "ลำดับของ skill คือ combo" and not "การวาง skill คือ combo").
 
-### Grid & placement rules
-- Skills are **blocks** with a shape (e.g. โจมตี 3×2, แช่แข็ง 1×2). The player packs them into a **grid**
-  (starts small, grows with days like the old slots). Blocks can be rotated.
-- Every skill runs its **own cooldown in parallel**; when ready it fires.
-- **Connect bonuses (conditions):** each copy rolls 1–2 bonuses like "touching ทุบหนัก: +damage per hit" or
-  "touching any control skill: fire it right away (⚡ trigger, its cooldown is not reset)". Any side counts.
-  Effects: +damage per hit, +shield per fire, −20% cooldown, +25% power, trigger. Level-up adds one bonus (max 3).
-- **Random per copy:** shape (from that skill's pool) and bonuses are rolled per shop offer from the run seed.
-- **Look:** every skill has its own pattern; blocks carry no text (hover = name, effect, bonuses on/off; tap on mobile);
-  blocks with an active bonus glow. Rotate with right-click, R, or the button. Backpack holds 6 unused skills.
-- **Buff / debuff skills:** ขยายพลัง (double own buffs, capped), ชำระล้าง (remove one of each debuff on self),
-  สลายเวท (remove one of each enemy buff). **Engines:** ฟันเฟือง (every 1s fires one touching skill, round-robin,
-  its cooldown keeps running) and เร่งเครื่อง (fires every touching skill and restarts their cooldowns).
-- **Levels & space:** skills go up to Lv5 (ตื่นพลัง still raises to Lv3). The shop also sells grid space
-  (+1 column/row, 4 gold then +2 each time, max 8×6). "🏳 ยอมแพ้" (give up the run) sits in the top bar and during your own fights.
-- **Readability:** live buff (gold) / debuff (red) chips under each HP bar; after every fight a per-skill table:
-  own fires + triggered fires, damage and % of total, damage from connect bonuses, heal, shield, freeze time.
-- Chains: A → B → C is allowed; each skill fires at most once per chain (no infinite loops); chain length shown as combo.
-- Freeze pauses **all** of the target's cooldowns, with diminishing returns + a total-control cap per fight.
+### Skill list rules
+- The build is a hero + a list of skills (top to bottom). All of them fight; the order only breaks ties (top fires first).
+- **Slots:** 3 on days 1–3, 4 on days 4–6, 5 on days 7–9, 6 from day 10. The shop sells +1 slot
+  (4 gold, then +2 each time, max 8 slots); เสบียงสุดท้าย also gives +1 slot. No backpack: sell a skill to free a slot.
+- Every copy of a skill is the same; buying a skill you own levels it up (max Lv5; ตื่นพลัง raises to Lv3).
+- **Look:** skills are shown as text (name, level, effect, cooldown); no icons or shapes. Hover / tap shows the details.
+  The replay shows each side's list with a cooldown bar per skill that flashes when the skill fires.
+- **Buff / debuff skills:** ขยายพลัง (double own buffs, capped), ชำระล้าง (remove debuffs on self),
+  สลายเวท (remove one of each enemy buff, 20% of their shield).
+- **Control caps:** freeze and cast delay share a cap per fight (3s / 5s / 7s by day) with diminishing returns;
+  total slowed time is capped at twice that. ใจเหล็ก reduces control by 60%.
+- "🏳 ยอมแพ้" (give up the run) sits in the top bar and during your own fights.
 
 ### Combat
 - [x] **C1 Sim version** — `SIM_VERSION`; fights/replays store it; old-version replays say so instead of re-simulating wrong
-- [x] **C2 Grid model** — shapes, rotation, placement validation, adjacency + link-edge resolution (pure, in `src/sim/`)
-- [x] **C3 Parallel cooldown engine** — replace the cast queue with per-skill cooldowns; trigger chains via links;
+- [x] **C2 Grid model** — *(removed 18 Nov: replaced by the skill list)*
+- [x] **C3 Parallel cooldown engine** — replace the cast queue with per-skill cooldowns;
   hooks (`onStart`, `onFire`, `onHit`, `onDamaged`, `onStatus`, `onTick`) so passives/daily rules plug in and `combat.ts` has no hero ids
-- [x] **C4 Skill data** — every skill gets cooldown, shape pool, possible link bonuses; random roll is seeded (deterministic)
+- [x] **C4 Skill data** — every skill gets a cooldown; shop rolls are seeded (deterministic)
 - [x] **C5 Fight length & control caps** — base HP by day (≈12s day 1–3, 20–30s day 8+); freeze/slow diminishing returns + cap
-- [x] **C6 Fight explanation** — post-fight summary in Thai: damage by skill, chains fired, time frozen, biggest hit, "why you lost"
-- [x] **C7 Grid UI** — drag/drop + rotate on mouse and touch, shows link edges lighting up when connected; replay highlights blocks as they fire and draws the chain
-- [x] **C8 Bot packing** — AI/balance bot buys and packs blocks onto the grid (greedy: maximise active links)
+- [x] **C6 Fight explanation** — post-fight summary in Thai: damage by skill, skill fires, time controlled, biggest hit, "why you lost"
+- [x] **C7 Skill list UI** — text-only vertical list, move up/down, sell, buy slot; replay cooldown bars per skill
+- [x] **C8 Bot shop** — AI/balance bot fills free slots, buys a slot or swaps out its weakest skill when full
 - [x] **C9 Balance pass** — all archetype pairs ≤ 65% at day 5, 10, 13
 
 ### Character
@@ -78,7 +73,7 @@ of them to support daily rules and free rotation later.
 - [x] `npm run balance` prints archetype matrix **and** per-hero matrix; nothing > 65% (archetypes; hero pairs ≤ 70%)
 - [x] Average fight length per day printed and inside targets
 - [x] README updated
-- [ ] Vision doc: "ลำดับของ skill คือ combo" → "การวาง skill คือ combo" (vision doc is outside the repo)
+- [ ] Vision doc: TCG section → "skills fire on their own cooldowns, all at once" (vision doc is outside the repo)
 
 ---
 

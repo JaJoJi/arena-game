@@ -3,39 +3,17 @@ export const ARCHES: Archetype[] = ['tank', 'burst', 'scaling', 'control'];
 
 export type Mark = 'burn' | 'echo' | 'quick' | 'steadfast';
 
-export type Rot = 0 | 1 | 2 | 3;
-
-/**
- * Connect bonus effects (values in grid.ts bonusValue):
- * dmg: every hit of this skill deals more · shield: gain shield when it fires
- * haste: shorter cooldown · power: all numbers stronger
- * trigger: when it fires, every touching block that matches fires right away (their cooldown is not reset)
- */
-export type BonusKind = 'dmg' | 'shield' | 'haste' | 'power' | 'trigger';
-
-/** Active when ANY touching block matches t: a skill id, or 'arch:<archetype>'. Side does not matter. */
-export interface Bonus {
-  t: string;
-  e: BonusKind;
-}
-
-/** One skill block. x < 0 means it is in the bag (owned, not placed, does not fight). */
+/** One equipped skill. Every skill runs its own cooldown in parallel; skills do not interact by position. */
 export interface SkillInstance {
   id: string;
-  lv: number;
+  /** tree variant: '' = Lv1, 'a' / 'b' = Lv2, 'a1' 'a2' 'b1' 'b2' = Lv3 (see skills.ts) */
+  v: string;
   mark?: Mark;
-  shape: string;
-  rot: Rot;
-  x: number;
-  y: number;
-  bonus: Bonus[];
 }
 
-/** A build is a hero plus skill blocks packed into a w×h grid. Placement is the combo. */
+/** A build is a hero plus its skill list (shown top to bottom; the order does not change the fight). */
 export interface Build {
   hero: string;
-  w: number;
-  h: number;
   skills: SkillInstance[];
 }
 
@@ -76,14 +54,10 @@ export interface Fx {
 
 /** Per-block stats for the post-fight breakdown. Index = build.skills index. */
 export interface BlockStat {
-  /** fires on its own cooldown */
+  /** fires */
   c: number;
-  /** fires caused by a trigger bonus or an engine */
-  tc: number;
   /** damage dealt (including what shields blocked) */
   d: number;
-  /** part of d that came from connect bonuses */
-  bd: number;
   /** damage that this block's buffs (พลังโจมตี stacks, รวมพลัง) added to hits of ANY block */
   bf: number;
   /** HP healed */
@@ -101,8 +75,8 @@ export interface Snap {
 }
 
 export type EventBody =
-  /** idx = index into that side's build.skills. chain = 0 for a block firing on its own cooldown, n for the n-th link of a chain. */
-  | { type: 'cast'; side: Side; skill: string; lv: number; idx: number; chain: number; from?: number; echo?: boolean }
+  /** idx = index into that side's build.skills */
+  | { type: 'cast'; side: Side; skill: string; lv: number; idx: number; echo?: boolean }
   | { type: 'damage'; side: Side; amount: number; blocked: number; src: string }
   | { type: 'shield'; side: Side; amount: number }
   | { type: 'heal'; side: Side; amount: number }

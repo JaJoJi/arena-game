@@ -1,14 +1,12 @@
 import { randomAiBuild } from '../sim/bot';
 import { SIM_VERSION, cdTicks, simulate } from '../sim/combat';
-import { HASTE_BONUS, POWER_BONUS, activeBonuses, fits, matches, type Offer } from '../sim/grid';
 import { HEROES, HEROES_BY_ID } from '../sim/heroes';
 import { explain } from '../sim/explain';
 import { hashSeed } from '../sim/rng';
 import * as R from '../sim/run';
-import { ARCH_NAME, SKILLS } from '../sim/skills';
-import type { BlockStat, Build, CombatEvent, CombatResult, Rot, SkillInstance } from '../sim/types';
+import { ARCH_NAME, KEYWORDS, SKILLS, chipsOf, lvOf, nodeOf, type Keyword } from '../sim/skills';
+import type { BlockStat, Build, CombatEvent, CombatResult, SkillInstance } from '../sim/types';
 import { HERO_PX, drawHero } from './sprites';
-import { BONUS_ICON, bonusText, dropOrigin, footprintAt, gridHTML, installPatterns, pieceHTML } from './gridView';
 import { api, type FightResponse, type ReplayRecord } from './api';
 import type { CombatScene } from './combatScene';
 import { BUILDINGS, BUILDING_BY_ID } from './townData';
@@ -40,14 +38,10 @@ let replay: ReplayRecord | null = null;
 let busy = false;
 let toast = '';
 let names: [string, string] = ['', ''];
-/** selected block (index into run.skills) */
-let sel: number | null = null;
 let confirmConcede = false;
-/** one colour per bonus slot: tooltip line and highlighted shapes share it */
-const HL = ['#ff6bd6', '#5ce1ff', '#9dff6b'];
 
 // ---------- storage (per-browser convenience only; may be unavailable) ----------
-const RUN_KEY = 'arena.run.v4';
+const RUN_KEY = 'arena.run.v6';
 const NAME_KEY = 'arena.name';
 function store(key: string, value: string | null) {
   try {
@@ -68,7 +62,7 @@ const saveRun = () => store(RUN_KEY, run ? JSON.stringify(run) : null);
 function loadRun(): R.RunState | null {
   try {
     const r = JSON.parse(fetchStore(RUN_KEY) ?? 'null') as R.RunState | null;
-    return r && r.v === 4 ? r : null;
+    return r && r.v === 6 ? r : null;
   } catch {
     return null;
   }
@@ -78,51 +72,47 @@ const playerName = () => (fetchStore(NAME_KEY) || 'ผู้เล่น').slice
 // ---------- helpers ----------
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-const secs = (k: SkillInstance, haste = 0) => (cdTicks(k.id, k.mark, haste) / 10).toFixed(1);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 const randSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 
-function skillLine(k: SkillInstance) {
-  const d = SKILLS[k.id];
-  const mark = k.mark ? ` <span class="mark">${R.MARK_INFO[k.mark].name}</span>` : '';
-  return `<span class="nm">${d.name} <small>Lv${k.lv}</small>${mark}</span>
-    <span class="desc">${d.desc(k.lv)} · ทุก ${secs(k)} วิ</span>`;
+/** Icon + number chips for a skill variant; each chip explains its keyword on hover / tap. */
+function chipsHTML(k: Pick<SkillInstance, 'id' | 'v' | 'mark'>) {
+  return `<span class="chips-row">${chipsOf(nodeOf(k), cdTicks(k))
+    .map((c) => `<span class="kw kw-${c.kw}" data-kw="${c.kw}">${esc(c.text)}</span>`)
+    .join('')}</span>`;
 }
 
-/** Hover / selected details for a skill: name, effect, cooldown, each connect bonus (on or off). */
-function tipBody(k: Pick<SkillInstance, 'id' | 'lv' | 'mark' | 'bonus'>, fx: ReturnType<typeof bonusState> | null, note = '') {
+/** Name, level, mark and chips of a skill (one list row). */
+function skillLine(k: Pick<SkillInstance, 'id' | 'v' | 'mark'>) {
+  const mark = k.mark ? ` <span class="mark">${R.MARK_INFO[k.mark].name}</span>` : '';
+  return `<span class="nm">${nodeOf(k).name} <small>Lv${lvOf(k.v)}</small>${mark}</span>${chipsHTML(k)}`;
+}
+
+/** Keyword tooltip: icon, name and meaning. */
+function kwTip(kw: Keyword) {
+  const x = KEYWORDS[kw];
+  return `<div class="tt-h"><b>${x.icon} ${x.name}</b></div><div class="desc">${x.desc}</div>`;
+}
+
+/** Hover details for a skill: name, chips, each keyword explained, the branch it is on. */
+function tipBody(k: Pick<SkillInstance, 'id' | 'v' | 'mark'>, note = '') {
   const d = SKILLS[k.id];
-  const on = fx?.on ?? new Set<number>();
-  const bonus = k.bonus
-    .map((b, bi) => `<li class="${on.has(bi) ? 'on' : ''}" style="--hl:${HL[bi % HL.length]}"><span class="bi">${BONUS_ICON[b.e]}</span> ${bonusText(b, k.lv)}${on.has(bi) ? ' <b class="ok">✓ ทำงาน</b>' : ''}</li>`)
-    .join('');
-  return `<div class="tt-h arch-${d.arch}"><b>${d.name}</b> <small>Lv${k.lv}</small>${d.hero ? ' <span class="mark">เฉพาะ</span>' : ''}
+  const node = nodeOf(k);
+  const kws = [...new Set(chipsOf(node).map((c) => c.kw))].filter((kw) => kw !== 'cd');
+  const branch = k.v.length >= 1 ? d.tree[k.v[0] as 'a' | 'b'].style : '';
+  return `<div class="tt-h arch-${d.arch}"><b>${node.name}</b> <small>Lv${lvOf(k.v)}</small>${d.hero ? ' <span class="mark">เฉพาะ</span>' : ''}
       ${k.mark ? ` <span class="mark">${R.MARK_INFO[k.mark].name}</span>` : ''}</div>
-    <div class="muted small">${ARCH_NAME[d.arch]} · ทุก ${(cdTicks(k.id, k.mark, fx?.haste ?? 0) / 10).toFixed(1)} วิ${fx?.power ? ` · แรงขึ้น ${Math.round(fx.power * 100)}%` : ''}</div>
-    <div class="desc">${d.desc(k.lv)}</div>
-    ${bonus ? `<div class="muted small">โบนัสเมื่อวางติดกัน (ด้านไหนก็ได้)</div><ul class="bonus">${bonus}</ul>` : ''}
-    ${fx?.triggeredBy.length ? `<div class="combo small">⚡ ถูกสั่งโดย ${fx.triggeredBy.join(', ')}</div>` : ''}
+    <div class="muted small">${ARCH_NAME[d.arch]}${branch ? ` · สาย${branch}` : ''}${k.v ? ` · มาจาก ${d.name}` : ''}</div>
+    <div>${chipsHTML(k)}</div>
+    <ul class="kwlist">${kws.map((kw) => `<li><b>${KEYWORDS[kw].icon} ${KEYWORDS[kw].name}</b> ${KEYWORDS[kw].desc}</li>`).join('')}</ul>
+    ${k.mark ? `<div class="muted small">ตรา${R.MARK_INFO[k.mark].name}: ${R.MARK_INFO[k.mark].desc}</div>` : ''}
     ${note ? `<div class="muted small">${note}</div>` : ''}`;
 }
 
 function buildList(b: Build) {
-  return `<div class="buildview">${gridHTML(b.skills, b.w, b.h, { small: true })}
-  <ol class="build readonly">${b.skills
-    .map((k) => `<li class="arch-${SKILLS[k.id].arch}">${skillLine(k)}</li>`)
-    .join('')}</ol></div>`;
-}
-
-/** Which connect bonuses of block i are on, and what they add up to. */
-function bonusState(r: R.RunState, i: number) {
-  const { w, h } = R.gridOf(r);
-  const act = activeBonuses(r.skills, w, h);
-  const mine = act.filter((a) => a.from === i);
-  return {
-    on: new Set(mine.map((a) => a.bi)),
-    haste: mine.filter((a) => a.b.e === 'haste').length * HASTE_BONUS,
-    power: mine.filter((a) => a.b.e === 'power').length * POWER_BONUS,
-    triggeredBy: act.filter((a) => a.b.e === 'trigger' && a.to.includes(i)).map((a) => SKILLS[r.skills[a.from].id].name),
-  };
+  return `<ol class="build readonly">${b.skills
+    .map((k) => `<li class="arch-${SKILLS[k.id].arch}"><div class="sk-text">${skillLine(k)}</div></li>`)
+    .join('')}</ol>`;
 }
 
 function tipFor(key: string): string {
@@ -131,15 +121,14 @@ function tipFor(key: string): string {
   const [kind, n] = [key[0], Number(key.slice(2))];
   if (kind === 'g') {
     const k = r.skills[n];
-    if (!k) return '';
-    return tipBody(k, k.x >= 0 ? bonusState(r, n) : null, k.x < 0 ? 'อยู่ในกระเป๋า: ไม่ได้ลงสู้' : 'คลิกขวาหรือกด R เพื่อหมุน');
+    return k ? tipBody(k) : '';
   }
   if (kind === 's') {
-    const o: Offer | null = r.shop[n];
+    const o = r.shop[n];
     if (!o) return '';
-    const owned = r.skills.find((k) => k.id === o.id);
-    if (owned) return tipBody({ ...owned, lv: Math.min(R.MAX_LV, owned.lv + 1) }, null, 'มีแล้ว: ซื้อเพื่ออัปเลเวล ใช้รูปเดิม และได้โบนัสใหม่ 1 อัน');
-    return tipBody({ id: o.id, lv: 1, bonus: o.bonus }, null);
+    const owned = R.upgradeOf(r, o);
+    if (owned) return tipBody({ ...owned, v: o.v }, `อัปเกรดจาก ${nodeOf(owned).name} Lv${lvOf(owned.v)} (ใช้ช่องเดิม)`);
+    return tipBody({ id: o.id, v: o.v });
   }
   return '';
 }
@@ -190,7 +179,6 @@ function render() {
   $panel.innerHTML = (toast ? `<div class="toast">${esc(toast)}</div>` : '') + html;
   toast = '';
   // selected skill (tap on mobile) shows the same colour highlight as hover
-  if (view === 'shop' && sel !== null) highlightFor('g:' + sel);
   if (view === 'title') {
     const input = document.getElementById('name') as HTMLInputElement | null;
     input?.addEventListener('input', () => store(NAME_KEY, input.value.trim()));
@@ -217,7 +205,7 @@ function renderTown() {
         (h) => `<div class="card arch-${h.arch}">${heroArt(h.id, 'small')}<div class="nm">${h.name}</div><div class="tag">${ARCH_NAME[h.arch]}</div>
           <div class="desc"><b>วิธีเล่น:</b> ${h.style}</div>
           <div class="desc"><b>ความสามารถ:</b> ${h.passive}</div>
-          <div class="desc muted">skill เฉพาะ: <b>${SKILLS[h.unique].name}</b>: ${SKILLS[h.unique].desc(1)}</div></div>`,
+          <div class="desc muted">skill เฉพาะ: <b>${SKILLS[h.unique].name}</b> ${chipsHTML({ id: h.unique, v: '' })}</div></div>`,
       ).join('')}</div>`;
     } else if (b.future) {
       body += `<p class="muted">เร็วๆ นี้: ${b.future}</p>`;
@@ -249,26 +237,20 @@ function renderTitle() {
       <b>${h.name}</b><span class="tag">${ARCH_NAME[h.arch]}</span>
       <span>${h.style}</span>
       <span>${h.passive}</span>
-      <span class="muted">skill เฉพาะ: ${SKILLS[h.unique].name}: ${SKILLS[h.unique].desc(1)}</span>
+      <span class="muted">skill เฉพาะ: ${SKILLS[h.unique].name} ${chipsHTML({ id: h.unique, v: '' })}</span>
     </button>`,
   ).join('')}</div>`;
 }
 
-/** Shop card that sells +1 column / row of grid space. */
-function expandCard(r: R.RunState) {
-  const what = R.nextExpand(r);
-  const price = R.expandPrice(r);
-  const { w, h } = R.gridOf(r);
-  const nw = what === 'col' ? w + 1 : w;
-  const nh = what === 'row' ? h + 1 : h;
-  let cells = '';
-  for (let y = 0; y < nh; y++)
-    for (let x = 0; x < nw; x++) cells += `<i class="${x >= w || y >= h ? 'new' : ''}" style="left:${x * 9}px;top:${y * 9}px"></i>`;
-  const why = !what ? 'ใหญ่สุดแล้ว' : r.gold < price ? 'เงินไม่พอ' : '';
-  return `<div class="card offer expand" title="ซื้อพื้นที่ตารางเพิ่ม ถาวรทั้งรอบ ราคาขึ้นทุกครั้งที่ซื้อ">
-    <div class="offer-art"><div class="minigrid" style="width:${nw * 9}px;height:${nh * 9}px">${cells}</div></div>
-    <div class="offer-meta">${what ? `ขยายตาราง +1 ${what === 'col' ? 'คอลัมน์' : 'แถว'}` : 'ตาราง 8×6 แล้ว'}</div>
-    <button data-a="expand" ${why ? 'disabled' : ''}>${why || `ซื้อ ${price}`}</button>
+/** Shop card that sells +1 skill slot. */
+function slotCard(r: R.RunState) {
+  const price = R.slotPrice(r);
+  const maxed = R.slotsOf(r) >= R.MAX_SLOTS;
+  const why = maxed ? 'เต็มแล้ว' : r.gold < price ? 'เงินไม่พอ' : '';
+  return `<div class="card offer expand" title="ช่อง skill +1 ถาวรทั้งรอบ ราคาขึ้นทุกครั้งที่ซื้อ">
+    <div class="offer-name">ช่อง skill +1</div>
+    <div class="offer-desc">${maxed ? `มีครบ ${R.MAX_SLOTS} ช่องแล้ว` : `ถาวรทั้งรอบ · ตอนนี้ ${R.slotsOf(r)}/${R.MAX_SLOTS} ช่อง`}</div>
+    <button data-a="slot" ${why ? 'disabled' : ''}>${why || `ซื้อ ${price}`}</button>
   </div>`;
 }
 
@@ -276,44 +258,40 @@ function renderShop() {
   const r = run!;
   scene.idle(r.hero);
   const hero = HEROES_BY_ID[r.hero];
-  const { w, h } = R.gridOf(r);
-  if (sel !== null && !r.skills[sel]) sel = null;
+  const slots = R.slotsOf(r);
   const shop = r.shop
     .map((o, i) => {
       if (!o) return `<div class="card empty">ซื้อแล้ว</div>`;
       const d = SKILLS[o.id];
-      const owned = r.skills.find((k) => k.id === o.id);
-      const lv = owned ? owned.lv + 1 : 1;
-      const price = R.priceOf(o.id);
-      const maxed = !!owned && owned.lv >= R.MAX_LV;
-      const disabled = r.gold < price || maxed;
-      const why = maxed ? 'เต็มแล้ว' : r.gold < price ? 'เงินไม่พอ' : '';
-      const look = owned ? { ...owned, lv: Math.min(lv, R.MAX_LV) } : { ...o, lv: 1 };
-      return `<div class="card offer" data-tip="s:${i}">
-        <div class="offer-art">${pieceHTML(look, { tip: `s:${i}` })}</div>
-        <div class="offer-meta">${owned ? `<span class="up">อัป Lv${Math.min(lv, R.MAX_LV)}</span>` : ''}${o.bonus.length && !owned ? `<span class="bicons">${o.bonus.map((b) => BONUS_ICON[b.e]).join(' ')}</span>` : ''}${d.hero ? '<span class="mark">เฉพาะ</span>' : ''}</div>
-        <button data-a="buy" data-i="${i}" ${disabled ? 'disabled' : ''}>${why || `ซื้อ ${price}`}</button>
+      const node = d.tree[o.v as '' | 'a'];
+      const up = R.upgradeOf(r, o);
+      const price = R.priceOf(o);
+      const stale = o.v !== '' && !up;
+      const full = o.v === '' && r.skills.length >= slots;
+      const why = stale ? 'ใช้ไม่ได้แล้ว' : r.gold < price ? 'เงินไม่พอ' : full ? 'ช่องเต็ม' : '';
+      const branch = o.v ? d.tree[o.v[0] as 'a' | 'b'].style : '';
+      return `<div class="card offer arch-${d.arch}${o.v ? ' upgrade' : ''}" data-tip="s:${i}">
+        <div class="offer-name">${node.name} <small>Lv${lvOf(o.v)}</small></div>
+        <div class="offer-meta">${o.v ? `<span class="up">⬆ อัปเกรด ${d.name}${branch ? ` · ${branch}` : ''}</span>` : `<span class="muted">${ARCH_NAME[d.arch]}</span>`}${d.hero ? '<span class="mark">เฉพาะ</span>' : ''}</div>
+        <div class="offer-desc">${chipsHTML({ id: o.id, v: o.v })}</div>
+        <button data-a="buy" data-i="${i}" ${why ? 'disabled' : ''}>${why || `ซื้อ ${price}`}</button>
       </div>`;
     })
     .join('');
-  const bagItems = r.skills
-    .map((k, i) => (k.x < 0 ? `<div class="bagitem">${pieceHTML(k, { idx: i, tip: `g:${i}`, selected: sel === i })}</div>` : ''))
+  const rows = r.skills
+    .map(
+      (k, i) => `<li class="skillrow arch-${SKILLS[k.id].arch}" data-tip="g:${i}">
+        <div class="sk-text">${skillLine(k)}</div>
+        <div class="sk-btns">
+          <button class="small ghost" data-a="up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="เลื่อนขึ้น">▲</button>
+          <button class="small ghost" data-a="down" data-i="${i}" ${i === r.skills.length - 1 ? 'disabled' : ''} aria-label="เลื่อนลง">▼</button>
+          <button class="small" data-a="sell" data-i="${i}">ขาย +${R.sellPrice(k)}</button>
+        </div>
+      </li>`,
+    )
     .join('');
-  const freeSlots = Math.max(0, R.BAG_MAX - R.bag(r).length);
-  let info = '<p class="muted">ชี้เมาส์ที่ skill เพื่อดูรายละเอียด · ลากไปวาง · คลิกขวาหรือกด R เพื่อหมุน · ตัวที่เรืองแสง = โบนัสติดกันทำงาน</p>';
-  if (sel !== null) {
-    const k = r.skills[sel];
-    info = `<div class="selinfo arch-${SKILLS[k.id].arch}">
-      ${tipBody(k, k.x >= 0 ? bonusState(r, sel) : null, k.x < 0 ? 'อยู่ในกระเป๋า: ไม่ได้ลงสู้' : '')}
-      <div class="actions">
-        <button class="small" data-a="rot">หมุน ⟳</button>
-        ${k.x >= 0 ? '<button class="small" data-a="bag">เก็บเข้ากระเป๋า</button>' : ''}
-        <button class="small" data-a="sell" data-i="${sel}">ขาย +${k.lv}</button>
-        <button class="small ghost" data-a="desel">ยกเลิก</button>
-      </div></div>`;
-  }
+  const empty = '<li class="skillrow emptyslot"><span class="muted">ช่องว่าง: ซื้อ skill จากร้าน</span></li>'.repeat(Math.max(0, slots - r.skills.length));
   const inc = r.lastIncome;
-  const placed = r.skills.filter((k) => k.x >= 0).length;
   return `
   <div class="stats">
     <span>วันที่ <b>${r.day}</b></span>
@@ -326,22 +304,12 @@ function renderShop() {
   </div>
   <p class="muted">วันนี้ได้ +${inc.base}${inc.bonus ? ` และโบนัส +${inc.bonus}` : ''} · ${hero.name}: ${hero.passive}</p>
   <h3>ร้าน skill <button class="small" data-a="reroll" ${r.gold < R.REROLL ? 'disabled' : ''}>สุ่มใหม่ (${R.REROLL})</button></h3>
-  <div class="shop">${shop}${expandCard(r)}</div>
-  <h3>ตาราง skill ${w}×${h} <small class="muted">ทุกตัวนับคูลดาวน์พร้อมกัน · วางให้ติดกับตัวที่โบนัสต้องการ แล้วตัวนั้นจะเรืองแสง</small></h3>
-  <div class="pack">
-    ${gridHTML(r.skills, w, h, { interactive: true, selected: sel ?? undefined })}
-    <div class="side">
-      <div class="bag" data-drop="bag">
-        <div class="bag-h"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M8 7V5a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="4" y="7" width="16" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 13h16" stroke="currentColor" stroke-width="2"/></svg>
-        กระเป๋าเก็บ skill <small class="muted">${R.bag(r).length}/${R.BAG_MAX} · ไม่ได้ลงสู้</small></div>
-        <div class="bag-items">${bagItems}${'<div class="bagslot"></div>'.repeat(freeSlots)}</div>
-      </div>
-      <div class="sellzone" data-drop="sell">ลากมาที่นี่เพื่อขาย</div>
-    </div>
-  </div>
-  ${info}
+  <div class="shop">${shop}${slotCard(r)}</div>
+  <h3>skill ของคุณ ${r.skills.length}/${slots} <small class="muted">ทุกตัวนับคูลดาวน์พร้อมกัน แล้วทำงานเองเมื่อพร้อม · ช่องเพิ่มทุก 3 วัน</small></h3>
+  <ol class="skilllist">${rows}${empty}</ol>
+  <p class="muted small">ชี้เมาส์ (หรือแตะ) ที่ skill เพื่อดูรายละเอียด · ลำดับมีผลแค่ตอนพร้อมกันพอดี (ตัวบนทำก่อน)</p>
   <div class="actions">
-    <button class="primary" data-a="fight" ${busy || !placed ? 'disabled' : ''}>สู้วันที่ ${r.day} · ถ้าแพ้เสียเลือด ${R.damageFor(r.day)}</button>
+    <button class="primary" data-a="fight" ${busy || !r.skills.length ? 'disabled' : ''}>สู้วันที่ ${r.day} · ถ้าแพ้เสียเลือด ${R.damageFor(r.day)}</button>
     <button class="ghost" data-a="town">กลับเมือง</button>
   </div>`;
 }
@@ -399,7 +367,7 @@ function vsSummary(r: CombatResult, builds: [Build, Build], names2: [string, str
   const fmt = (key: keyof BlockStat, v: number) => (key === 'fz' ? (v / 10).toFixed(1) : String(v));
   const breakdown = (side: 0 | 1, key: keyof BlockStat) => {
     const list = builds[side].skills
-      .map((k, i) => ({ name: SKILLS[k.id].name, v: r.stats[side][i]?.[key] ?? 0 }))
+      .map((k, i) => ({ name: nodeOf(k).name, v: r.stats[side][i]?.[key] ?? 0 }))
       .filter((x) => x.v > 0)
       .sort((a, b) => b.v - a.v);
     return list.length
@@ -426,7 +394,7 @@ function vsSummary(r: CombatResult, builds: [Build, Build], names2: [string, str
   const tookFrom = (side: 0 | 1) => {
     const att = (1 - side) as 0 | 1;
     const list = builds[att].skills
-      .map((k, i) => ({ name: SKILLS[k.id].name, v: r.stats[att][i]?.d ?? 0 }))
+      .map((k, i) => ({ name: nodeOf(k).name, v: r.stats[att][i]?.d ?? 0 }))
       .filter((x) => x.v > 0);
     if (fatigue[side]) list.push({ name: 'เหนื่อยล้า (หลัง 30 วิ)', v: fatigue[side] });
     list.sort((a, b) => b.v - a.v);
@@ -475,10 +443,9 @@ function statsTable(b: Build, stats: BlockStat[]) {
     .map(({ k, st }) => {
       const pct = total ? Math.round((st.d / total) * 100) : 0;
       return `<tr>
-        <td class="sk">${pieceHTML({ ...k, rot: 0 })}<span>${SKILLS[k.id].name} <small>Lv${k.lv}</small></span></td>
-        <td>${st.c}${st.tc ? ` <small class="combo">+${st.tc} ⚡</small>` : ''}</td>
+        <td class="sk"><span>${nodeOf(k).name} <small>Lv${lvOf(k.v)}</small></span></td>
+        <td>${st.c}</td>
         <td class="dmg"><div class="bar"><i style="width:${pct}%"></i></div><span>${st.d}</span> <small class="muted">${pct}%</small></td>
-        ${has('bd') ? `<td>${st.bd ? `+${st.bd}` : '·'}</td>` : ''}
         ${has('bf') ? `<td>${st.bf || '·'}</td>` : ''}
         ${has('h') ? `<td>${st.h || '·'}</td>` : ''}
         ${has('sh') ? `<td>${st.sh || '·'}</td>` : ''}
@@ -487,8 +454,8 @@ function statsTable(b: Build, stats: BlockStat[]) {
     })
     .join('');
   return `${headline}<div class="statwrap"><table class="stats-t">
-    <tr><th>skill</th><th>ใช้ <small>(+ถูกสั่ง)</small></th><th>ดาเมจ</th>
-      ${has('bd') ? '<th>จากโบนัสติดกัน</th>' : ''}${has('bf') ? '<th>บัฟเพิ่มดาเมจ</th>' : ''}${has('h') ? '<th>ฟื้นเลือด</th>' : ''}${has('sh') ? '<th>โล่</th>' : ''}${has('fz') ? '<th>แช่แข็ง</th>' : ''}</tr>
+    <tr><th>skill</th><th>ใช้</th><th>ดาเมจ</th>
+      ${has('bf') ? '<th>บัฟเพิ่มดาเมจ</th>' : ''}${has('h') ? '<th>ฟื้นเลือด</th>' : ''}${has('sh') ? '<th>โล่</th>' : ''}${has('fz') ? '<th>แช่แข็ง</th>' : ''}</tr>
     ${body}</table></div>`;
 }
 
@@ -529,7 +496,7 @@ function renderMark() {
   <h2>ได้ตรา: ${m.name}</h2>
   <p>${m.desc} · เลือก skill ที่จะใส่ตรา</p>
   <ol class="build">${r.skills
-    .map((k, i) => (k.x < 0 ? '' : `<li class="arch-${SKILLS[k.id].arch}">${skillLine(k)}<span class="btns"><button data-a="mark" data-i="${i}">ใส่ตรานี้</button></span></li>`))
+    .map((k, i) => (`<li class="arch-${SKILLS[k.id].arch}"><div class="sk-text">${skillLine(k)}</div><span class="btns"><button data-a="mark" data-i="${i}">ใส่ตรานี้</button></span></li>`))
     .join('')}</ol>
   <div class="actions"><button class="ghost" data-a="mark" data-i="-1">ไม่ใส่</button></div>`;
 }
@@ -573,7 +540,7 @@ function describe(e: CombatEvent): string | null {
   const who = (s: number) => esc(names[s]);
   switch (e.type) {
     case 'cast':
-      return `${e.chain ? '&nbsp;&nbsp;⚡ ' : ''}${who(e.side)} ใช้ <b>${SKILLS[e.skill].name}</b> Lv${e.lv}${e.chain ? ` <span class="combo">เชน x${e.chain + 1}</span>` : ''}${e.echo ? ' (ตีซ้ำ)' : ''}`;
+      return `${who(e.side)} ใช้ <b>${SKILLS[e.skill].name}</b> Lv${e.lv}${e.echo ? ' (ตีซ้ำ)' : ''}`;
     case 'damage': {
       const src = e.src === 'burn' ? 'ไฟ' : e.src === 'fatigue' ? 'ความเหนื่อยล้า' : e.src === 'thorns' ? 'หนาม' : SKILLS[e.src]?.name ?? e.src;
       return `&nbsp;&nbsp;${who(e.side)} เสีย ${e.amount}${e.blocked ? ` (โล่กัน ${e.blocked})` : ''} จาก${src}`;
@@ -708,7 +675,6 @@ function onClick(ev: Event) {
   let err: string | null = null;
   switch (a) {
     case 'start':
-      sel = null;
       {
         const seed = nextSeed ?? randSeed();
         if (!R.heroChoices(seed).includes(arg)) break; // only an offered hero can start a run
@@ -743,19 +709,13 @@ function onClick(ev: Event) {
       break;
     case 'sell':
       R.sell(run!, n);
-      sel = null;
       break;
-    case 'rot':
-      err = rotateSelected();
+    case 'up':
+    case 'down':
+      R.moveSkill(run!, n, a === 'up' ? -1 : 1);
       break;
-    case 'bag':
-      if (sel !== null) err = R.unplace(run!, sel);
-      break;
-    case 'desel':
-      sel = null;
-      break;
-    case 'expand':
-      err = R.buyExpand(run!);
+    case 'slot':
+      err = R.buySlot(run!);
       break;
     case 'concede':
       confirmConcede = true;
@@ -765,7 +725,6 @@ function onClick(ev: Event) {
       break;
     case 'concedeYes':
       confirmConcede = false;
-      sel = null;
       R.concede(run!);
       if (view === 'fighting') {
         scene.idle(null); // stop the replay
@@ -825,7 +784,6 @@ function showTip(key: string, x: number, y: number) {
     $tip.innerHTML = html;
     tipKey = key;
   }
-  if (!key.startsWith('raw:')) highlightFor(key);
   $tip.style.display = 'block';
   const r = $tip.getBoundingClientRect();
   const left = Math.min(window.innerWidth - r.width - 8, x + 16);
@@ -836,48 +794,13 @@ function showTip(key: string, x: number, y: number) {
 function hideTip() {
   if ($tip) $tip.style.display = 'none';
   tipKey = '';
-  clearHighlight();
 }
 
-let hlKey = '';
-function clearHighlight() {
-  hlKey = '';
-  document.querySelector('.grid.live')?.classList.remove('hovering');
-  document.querySelectorAll('.blk.hl-on, .blk.hl-hint, .blk.hl-self').forEach((el) => {
-    el.classList.remove('hl-on', 'hl-hint', 'hl-self');
-    (el as SVGElement).style.removeProperty('--hl');
-  });
-}
-
-/** Light up the shapes each bonus of the hovered skill/offer cares about, in that bonus's colour. */
-function highlightFor(key: string) {
-  if (key === hlKey || !run) return;
-  clearHighlight();
-  hlKey = key;
-  const r = run;
-  const n = Number(key.slice(2));
-  const from = key[0] === 'g' ? n : -1;
-  const bonus = key[0] === 'g' ? r.skills[n]?.bonus : r.shop[n]?.bonus;
-  if (!bonus) return;
-  const { w, h } = R.gridOf(r);
-  const act = from >= 0 && r.skills[from].x >= 0 ? activeBonuses(r.skills, w, h) : [];
-  const blockEl = (j: number) => document.querySelector(`.grid.live [data-blk="${j}"]`) as SVGElement | null;
-  document.querySelector('.grid.live')?.classList.add('hovering');
-  if (from >= 0) blockEl(from)?.classList.add('hl-self');
-  bonus.forEach((b, bi) => {
-    r.skills.forEach((k, j) => {
-      if (k.x < 0 || j === from || !matches(b.t, k)) return;
-      const el = blockEl(j);
-      if (!el || el.classList.contains('hl-on')) return;
-      const on = act.some((a) => a.from === from && a.bi === bi && a.to.includes(j));
-      el.classList.remove('hl-hint');
-      el.classList.add(on ? 'hl-on' : 'hl-hint');
-      el.style.setProperty('--hl', HL[bi % HL.length]);
-    });
-  });
-}
 function onHover(ev: PointerEvent) {
-  if (ev.pointerType !== 'mouse' || drag?.moved) return;
+  if (ev.pointerType !== 'mouse') return;
+  // a keyword chip explains its keyword (anywhere: shop, lists, hero hall)
+  const kw = (ev.target as Element).closest?.('[data-kw]') as HTMLElement | null;
+  if (kw) return showTip('raw:' + kwTip(kw.dataset.kw as Keyword), ev.clientX, ev.clientY);
   const tt = (ev.target as Element).closest?.('[data-ttxt]') as HTMLElement | null;
   if (tt) return showTip('raw:' + tt.dataset.ttxt, ev.clientX, ev.clientY);
   const el = (ev.target as Element).closest?.('[data-tip]') as HTMLElement | SVGElement | null;
@@ -885,174 +808,16 @@ function onHover(ev: PointerEvent) {
   else hideTip();
 }
 
-function onContextMenu(ev: MouseEvent) {
-  if (view !== 'shop' || !run) return;
-  if (drag?.moved) {
-    // right-click while dragging rotates the block in hand
-    ev.preventDefault();
-    drag.rot = ((drag.rot + 1) % 4) as Rot;
-    if (drag.ghost) drag.ghost.innerHTML = pieceHTML({ ...run.skills[drag.i], rot: drag.rot });
-    return;
-  }
-  const el = (ev.target as Element).closest?.('[data-blk]') as HTMLElement | SVGElement | null;
-  if (!el) return;
-  ev.preventDefault();
-  const prev = sel;
-  sel = Number(el.dataset.blk);
-  toast = rotateSelected() ?? '';
-  if (prev !== sel && toast) sel = prev;
-  hideTip();
-  saveRun();
-  render();
-}
-
-// ---------- grid: tap, drag, rotate ----------
-function rotateSelected(): string | null {
-  const r = run;
-  if (!r || sel === null) return null;
-  const k = r.skills[sel];
-  const rot = ((k.rot + 1) % 4) as Rot;
-  if (k.x < 0) {
-    k.rot = rot;
-    return null;
-  }
-  const { w, h } = R.gridOf(r);
-  const tries = [[0, 0], [-1, 0], [0, -1], [-1, -1], [1, 0], [0, 1], [-2, 0], [0, -2]];
-  for (const [dx, dy] of tries)
-    if (fits(r.skills, w, h, sel, k.x + dx, k.y + dy, rot)) return R.place(r, sel, k.x + dx, k.y + dy, rot);
-  // no room for the rotated shape here: rotate it anyway and park it in the backpack
-  if (R.unplace(r, sel)) return 'หมุนตรงนี้ไม่ได้ และกระเป๋าเต็ม';
-  k.rot = rot;
-  return 'หมุนแล้ว แต่ไม่มีที่ว่าง ย้ายไปไว้ในกระเป๋า ลากกลับมาวางได้';
-}
-
-/** Place block i so that it covers grid cell (gx, gy); tries every cell of the block as the anchor. */
-function placeCovering(i: number, gx: number, gy: number): string | null {
-  const r = run!;
-  const k = r.skills[i];
-  const { w, h } = R.gridOf(r);
-  const n = footprintAt(k, 0, 0).length;
-  for (let c = 0; c < n; c++) {
-    const [x, y] = dropOrigin(k, c, gx, gy);
-    if (fits(r.skills, w, h, i, x, y, k.rot)) return R.place(r, i, x, y, k.rot);
-  }
-  return 'วางตรงนี้ไม่ได้';
-}
-
-interface Drag {
-  i: number;
-  c: number;
-  sx: number;
-  sy: number;
-  moved: boolean;
-  /** rotation while dragging (R key); applied on drop */
-  rot: Rot;
-  ghost?: HTMLElement;
-}
-let drag: Drag | null = null;
-
-function elementAt(x: number, y: number) {
-  return document.elementFromPoint(x, y) as HTMLElement | null;
-}
-
-function clearPreview() {
-  document.querySelectorAll('.gc.ok, .gc.bad').forEach((el) => el.classList.remove('ok', 'bad'));
-}
-
 function onPointerDown(ev: PointerEvent) {
-  if (ev.pointerType !== 'mouse') {
-    // tap a chart block to see its details
-    const tt = (ev.target as Element).closest?.('[data-ttxt]') as HTMLElement | null;
-    if (tt) return showTip('raw:' + tt.dataset.ttxt, ev.clientX, ev.clientY);
-    if (!(ev.target as Element).closest?.('[data-tip]')) hideTip();
-  }
-  if (view !== 'shop' || !run) return;
-  if (ev.button === 2) return;
-  const el = (ev.target as Element).closest('[data-blk]') as HTMLElement | SVGElement | null;
-  if (el) {
-    drag = { i: Number(el.dataset.blk), c: Number(((ev.target as Element).closest('[data-c]') as SVGElement | null)?.dataset.c ?? 0), sx: ev.clientX, sy: ev.clientY, moved: false, rot: run.skills[Number(el.dataset.blk)].rot };
-    return;
-  }
-  // tap on an empty grid cell moves the selected block there
-  const cell = (ev.target as HTMLElement).closest<HTMLElement>('[data-gx]');
-  if (cell && sel !== null) {
-    toast = placeCovering(sel, Number(cell.dataset.gx), Number(cell.dataset.gy)) ?? '';
-    saveRun();
-    render();
-  }
-}
-
-function onPointerMove(ev: PointerEvent) {
-  if (!drag || !run) return;
-  if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < 6) return;
-  const k = { ...run.skills[drag.i], rot: drag.rot };
-  if (!drag.moved) {
-    drag.moved = true;
-    const cs = getComputedStyle(document.querySelector('.grid.live') ?? document.body).getPropertyValue('--c');
-    const g = document.createElement('div');
-    g.className = 'drag-ghost';
-    if (cs) g.style.setProperty('--c', cs);
-    g.innerHTML = pieceHTML(k);
-    hideTip();
-    document.body.appendChild(g);
-    drag.ghost = g;
-  }
-  const size = drag.ghost!.querySelector('.bc')?.getBoundingClientRect().width ?? 40;
-  const [ox, oy] = dropOrigin(k, drag.c, 0, 0); // = minus the grabbed cell's offset
-  drag.ghost!.style.left = `${ev.clientX + (ox - 0.5) * size}px`;
-  drag.ghost!.style.top = `${ev.clientY + (oy - 0.5) * size}px`;
-  clearPreview();
-  const cell = elementAt(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-gx]');
-  if (cell) {
-    const [x, y] = dropOrigin(k, drag.c, Number(cell.dataset.gx), Number(cell.dataset.gy));
-    const { w, h } = R.gridOf(run);
-    const ok = fits(run.skills, w, h, drag.i, x, y, drag.rot);
-    for (const [fx, fy] of footprintAt(k, x, y))
-      document.querySelector(`[data-gx="${fx}"][data-gy="${fy}"]`)?.classList.add(ok ? 'ok' : 'bad');
-  }
-}
-
-function onPointerUp(ev: PointerEvent) {
-  const d = drag;
-  drag = null;
-  if (!d || !run) return;
-  d.ghost?.remove();
-  clearPreview();
-  let err: string | null = null;
-  if (!d.moved) {
-    sel = sel === d.i ? null : d.i;
-  } else {
-    const under = elementAt(ev.clientX, ev.clientY);
-    const cell = under?.closest<HTMLElement>('[data-gx]');
-    const drop = under?.closest<HTMLElement>('[data-drop]')?.dataset.drop;
-    const k = { ...run.skills[d.i], rot: d.rot };
-    if (cell) {
-      const [x, y] = dropOrigin(k, d.c, Number(cell.dataset.gx), Number(cell.dataset.gy));
-      err = R.place(run, d.i, x, y, d.rot);
-      sel = d.i;
-    } else if (drop === 'bag') err = R.unplace(run, d.i);
-    else if (drop === 'sell') {
-      R.sell(run, d.i);
-      sel = null;
-    }
-  }
-  if (err) toast = err;
-  saveRun();
-  render();
-}
-
-function onKey(ev: KeyboardEvent) {
-  if (view !== 'shop' || (ev.target as HTMLElement).tagName === 'INPUT') return;
-  if (ev.key !== 'r' && ev.key !== 'R') return;
-  if (drag?.moved && run) {
-    // rotate while dragging; the new rotation is used on drop
-    drag.rot = ((drag.rot + 1) % 4) as Rot;
-    if (drag.ghost) drag.ghost.innerHTML = pieceHTML({ ...run.skills[drag.i], rot: drag.rot });
-    return;
-  }
-  toast = rotateSelected() ?? '';
-  saveRun();
-  render();
+  if (ev.pointerType === 'mouse') return;
+  // touch: tap a keyword chip, a chart bar or a skill to see its details
+  const kw = (ev.target as Element).closest?.('[data-kw]') as HTMLElement | null;
+  if (kw) return showTip('raw:' + kwTip(kw.dataset.kw as Keyword), ev.clientX, ev.clientY);
+  const tt = (ev.target as Element).closest?.('[data-ttxt]') as HTMLElement | null;
+  if (tt) return showTip('raw:' + tt.dataset.ttxt, ev.clientX, ev.clientY);
+  const el = (ev.target as Element).closest?.('[data-tip]') as HTMLElement | null;
+  if (el && view === 'shop' && !(ev.target as Element).closest('button')) return showTip(el.dataset.tip!, ev.clientX, ev.clientY);
+  hideTip();
 }
 
 export function startUI(st: Stage) {
@@ -1064,13 +829,8 @@ export function startUI(st: Stage) {
   };
   $panel.addEventListener('click', onClick);
   $panel.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
-  window.addEventListener('keydown', onKey);
   window.addEventListener('pointermove', onHover);
-  $panel.addEventListener('contextmenu', onContextMenu);
   $panel.addEventListener('pointerleave', hideTip);
-  installPatterns();
   run = loadRun();
   const rid = new URLSearchParams(location.search).get('replay');
   if (rid) {

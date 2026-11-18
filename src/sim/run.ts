@@ -1,21 +1,30 @@
 import { Rng, hashSeed } from './rng';
-import { MAX_BONUS, MAX_H, MAX_W, findSpot, fits, rollBonus, rollOffer, type Offer } from './grid';
-import { HEROES } from './heroes';
-import { SKILLS, SKILL_LIST } from './skills';
-import type { Build, Mark, Rot, SkillInstance } from './types';
+import { HEROES, HEROES_BY_ID } from './heroes';
+import { SKILLS, SKILL_LIST, lvOf, nextVariants } from './skills';
+import type { Build, Mark, SkillInstance } from './types';
 
 /** One run (รอบ) of the game: pick skills day by day until 8 wins or HP runs out. */
 
 export const START_HP = 20;
 export const WIN_TARGET = 8;
-export const SHOP_SIZE = 3;
-export const PRICE = 3;
-export const UNIQUE_PRICE = 4;
+export const SHOP_SIZE = 5;
+/** price by the level you buy: Lv1 skill, Lv2 upgrade, Lv3 upgrade (hero-unique skills +1) */
+export const PRICES = [3, 4, 5];
 export const REROLL = 1;
-export const MAX_LV = 5;
-/** ตื่นพลัง (last chance) raises skills to this level */
-export const AWAKEN_LV = 3;
-export const BAG_MAX = 6;
+export const MAX_LV = 3;
+/** gold on day 1: enough for two Lv1 skills, or the hero's unique + one Lv1 */
+export const DAY1_GOLD = 7;
+/** Skill slots: 3 on day 1, +1 every 3 days up to 6; buying slots can go up to MAX_SLOTS. */
+export const MAX_SLOTS = 8;
+
+/**
+ * Shop offer: a skill at a tree variant. v = '' is a new Lv1 skill; any other v is an upgrade of a skill you own
+ * (its next variant, one of two, picked at random by the shop).
+ */
+export interface Offer {
+  id: string;
+  v: string;
+}
 
 /** Heroes offered when a run starts (5 later with the pass). */
 export const HERO_CHOICES = 3;
@@ -53,7 +62,7 @@ export interface LogEntry {
 }
 
 export interface RunState {
-  v: 4;
+  v: 6;
   id: string;
   seed: number;
   hero: string;
@@ -65,13 +74,11 @@ export interface RunState {
   /** +n = n wins in a row, -n = n losses in a row */
   streak: number;
   lastIncome: { base: number; bonus: number };
-  /** extra grid rows (เสบียงสุดท้าย) */
-  bonusRows: number;
-  /** extra grid columns bought in the shop */
-  bonusCols: number;
-  /** how many times grid space was bought (price goes up) */
-  expands: number;
-  /** placed blocks (x >= 0) and bag (x < 0) */
+  /** extra skill slots (bought in the shop, or from เสบียงสุดท้าย) */
+  bonusSlots: number;
+  /** how many times a slot was bought (price goes up) */
+  slotBuys: number;
+  /** equipped skills, top to bottom (all of them fight) */
   skills: SkillInstance[];
   shop: (Offer | null)[];
   rolls: number;
@@ -84,58 +91,41 @@ export interface RunState {
   conceded?: boolean;
 }
 
-/** Grid grows with the day: 5×3 on day 1 up to 7×5 (+ bonus rows). */
-/** Grid grows with the day: 5×3 on day 1 up to 7×5, plus bought / bonus rows and columns (max 8×6). */
-export function gridFor(day: number, bonusRows = 0, bonusCols = 0) {
-  return {
-    w: Math.min(MAX_W, Math.min(7, 5 + Math.floor((day - 1) / 4)) + bonusCols),
-    h: Math.min(MAX_H, Math.min(5, 3 + Math.floor((day - 1) / 3)) + bonusRows),
-  };
+/** Skill slots on a day: 3 on days 1–3, 4 on 4–6, 5 on 7–9, 6 from day 10, plus bonus slots (max MAX_SLOTS). */
+export function slotsFor(day: number, bonus = 0) {
+  return Math.min(MAX_SLOTS, Math.min(6, 3 + Math.floor((day - 1) / 3)) + bonus);
 }
-export const gridOf = (s: RunState) => gridFor(s.day, s.bonusRows, s.bonusCols ?? 0);
+export const slotsOf = (s: RunState) => slotsFor(s.day, s.bonusSlots);
 
-/** Price of the next grid expansion in the shop. */
-export const expandPrice = (s: RunState) => 4 + 2 * (s.expands ?? 0);
+/** Price of the next skill slot in the shop. */
+export const slotPrice = (s: RunState) => 4 + 2 * s.slotBuys;
 
-/** What the next expansion adds: a column while the grid is not much wider than tall, else a row. null = grid is at max. */
-export function nextExpand(s: RunState): 'col' | 'row' | null {
-  const { w, h } = gridOf(s);
-  if (w < MAX_W && (w - h < 2 || h >= MAX_H)) return 'col';
-  if (h < MAX_H) return 'row';
-  return null;
-}
-
-/** Buy +1 column or row of grid space. */
-export function buyExpand(s: RunState): string | null {
-  const what = nextExpand(s);
-  if (!what) return 'ตารางใหญ่สุดแล้ว';
-  const price = expandPrice(s);
+/** Buy +1 skill slot for the rest of the run. */
+export function buySlot(s: RunState): string | null {
+  if (slotsOf(s) >= MAX_SLOTS) return 'ช่อง skill เต็มแล้ว';
+  const price = slotPrice(s);
   if (s.gold < price) return 'เงินไม่พอ';
-  // grow by one step from the CURRENT size (bonus may have been capped by the day's base size)
-  const before = gridOf(s);
-  if (what === 'col') s.bonusCols = (s.bonusCols ?? 0) + 1;
-  else s.bonusRows += 1;
-  const after = gridOf(s);
-  if (after.w === before.w && after.h === before.h) return 'ตารางใหญ่สุดแล้ว';
   s.gold -= price;
-  s.expands = (s.expands ?? 0) + 1;
+  s.bonusSlots++;
+  s.slotBuys++;
   return null;
 }
-export const bag = (s: RunState) => s.skills.filter((k) => k.x < 0);
-export const priceOf = (id: string) => (SKILLS[id].hero ? UNIQUE_PRICE : PRICE);
+export const priceOf = (o: Offer) => PRICES[lvOf(o.v) - 1] + (SKILLS[o.id].hero ? 1 : 0);
+/** gold back when selling: 1 / 2 / 3 by level */
+export const sellPrice = (k: SkillInstance) => lvOf(k.v);
 export const damageFor = (day: number) => day;
 
 /** Win streak bonus is clearly bigger than the loss-streak comeback money. */
 export function incomeFor(day: number, streak: number) {
-  const base = 5 + Math.min(Math.floor(day / 2), 3);
+  const base = day <= 1 ? DAY1_GOLD : 5 + Math.min(Math.floor(day / 2), 3);
   const bonus = streak >= 5 ? 3 : streak >= 3 ? 2 : streak >= 2 ? 1 : streak <= -2 ? 1 : 0;
   return { base, bonus };
 }
 
 export function newRun(hero: string, seed: number, id: string): RunState {
   const s: RunState = {
-    v: 4, id, seed, hero, day: 1, hp: START_HP, wins: 0, losses: 0, gold: 0, streak: 0,
-    lastIncome: { base: 0, bonus: 0 }, bonusRows: 0, bonusCols: 0, expands: 0, skills: [], shop: [], rolls: 0,
+    v: 6, id, seed, hero, day: 1, hp: START_HP, wins: 0, losses: 0, gold: 0, streak: 0,
+    lastIncome: { base: 0, bonus: 0 }, bonusSlots: 0, slotBuys: 0, skills: [], shop: [], rolls: 0,
     ghost: false, pendingMark: null, phase: 'shop', rating: 1000, log: [],
   };
   beginDay(s);
@@ -151,15 +141,40 @@ export function beginDay(s: RunState) {
   s.phase = 'shop';
 }
 
+/** Is this offer an upgrade that still applies to what you own? */
+export function upgradeOf(s: RunState, o: Offer): SkillInstance | null {
+  if (o.v === '') return null;
+  const owned = s.skills.find((k) => k.id === o.id);
+  return owned && nextVariants(owned.v).includes(o.v as never) ? owned : null;
+}
+
+/**
+ * Day 1: the hero's fixed shop (same every run). Day 2+: 5 random offers, a mix of new Lv1 skills and upgrades
+ * (one random next variant per owned skill below Lv3; about half the offers are upgrades when there are some).
+ */
 function rollShop(s: RunState) {
+  if (s.day <= 1) {
+    s.shop = (HEROES_BY_ID[s.hero]?.day1 ?? []).slice(0, SHOP_SIZE).map((id) => ({ id, v: '' }));
+    return;
+  }
   const rng = new Rng(hashSeed(s.seed, s.day, s.rolls));
-  const pool = SKILL_LIST.filter((d) => !d.hero || d.hero === s.hero).map((d) => d.id);
+  const owned = new Set(s.skills.map((k) => k.id));
+  const fresh = SKILL_LIST.filter((d) => (!d.hero || d.hero === s.hero) && !owned.has(d.id)).map((d) => d.id);
+  const ups = s.skills.filter((k) => lvOf(k.v) < MAX_LV).map((k) => k.id);
   const picks: Offer[] = [];
-  while (picks.length < SHOP_SIZE && pool.length) picks.push(rollOffer(rng, pool.splice(rng.int(pool.length), 1)[0], s.hero));
+  while (picks.length < SHOP_SIZE && (fresh.length || ups.length)) {
+    const takeUp = ups.length > 0 && (fresh.length === 0 || rng.next() < 0.5);
+    if (takeUp) {
+      const id = ups.splice(rng.int(ups.length), 1)[0];
+      const k = s.skills.find((x) => x.id === id)!;
+      picks.push({ id, v: rng.pick(nextVariants(k.v)) });
+    } else picks.push({ id: fresh.splice(rng.int(fresh.length), 1)[0], v: '' });
+  }
   s.shop = picks;
 }
 
 export function reroll(s: RunState): string | null {
+  if (s.day <= 1) return 'วันแรกเป็นร้านประจำฮีโร่ สุ่มใหม่ได้ตั้งแต่วันที่ 2';
   if (s.gold < REROLL) return 'เงินไม่พอ';
   s.gold -= REROLL;
   s.rolls++;
@@ -167,30 +182,20 @@ export function reroll(s: RunState): string | null {
   return null;
 }
 
-/** Buying a skill you own levels it up (keeps its shape, gains one new connect bonus). A new skill goes to the first free spot, or the bag. */
+/** Buy offer i: a new skill needs a free slot; an upgrade replaces the owned skill's variant (same slot and mark). */
 export function buy(s: RunState, i: number): string | null {
   const offer = s.shop[i];
   if (!offer) return 'ไม่มีของ';
-  const price = priceOf(offer.id);
+  const price = priceOf(offer);
   if (s.gold < price) return 'เงินไม่พอ';
-  const owned = s.skills.find((k) => k.id === offer.id);
-  if (owned) {
-    if (owned.lv >= MAX_LV) return 'เลเวลเต็มแล้ว';
-    owned.lv++;
-    if (owned.bonus.length < MAX_BONUS) {
-      const b = rollBonus(new Rng(hashSeed(s.seed, s.day, s.rolls, 'lvl', i)), owned.id, s.hero, owned.bonus);
-      if (b) owned.bonus.push(b);
-    }
+  if (offer.v === '') {
+    if (s.skills.some((k) => k.id === offer.id)) return 'มี skill นี้แล้ว';
+    if (s.skills.length >= slotsOf(s)) return 'ช่อง skill เต็ม ขาย skill หรือซื้อช่องเพิ่มก่อน';
+    s.skills.push({ id: offer.id, v: '' });
   } else {
-    const { w, h } = gridOf(s);
-    s.skills.push({ id: offer.id, lv: 1, shape: offer.shape, rot: 0, x: -1, y: -1, bonus: offer.bonus.map((b) => ({ ...b })) });
-    const idx = s.skills.length - 1;
-    const spot = findSpot(s.skills, w, h, idx);
-    if (spot) Object.assign(s.skills[idx], spot);
-    else if (bag(s).length > BAG_MAX) {
-      s.skills.pop();
-      return 'ไม่มีที่ว่าง ขายหรือจัดตารางก่อน';
-    }
+    const owned = upgradeOf(s, offer);
+    if (!owned) return 'อัปเกรดนี้ใช้กับ skill ที่มีอยู่ไม่ได้แล้ว';
+    owned.v = offer.v;
   }
   s.gold -= price;
   s.shop[i] = null;
@@ -200,37 +205,21 @@ export function buy(s: RunState, i: number): string | null {
 export function sell(s: RunState, i: number) {
   const k = s.skills[i];
   if (!k) return;
-  s.gold += k.lv;
+  s.gold += sellPrice(k);
   s.skills.splice(i, 1);
 }
 
-/** Put block i at (x, y) with rotation rot. Returns an error if it does not fit. */
-export function place(s: RunState, i: number, x: number, y: number, rot: Rot): string | null {
-  const k = s.skills[i];
-  if (!k) return 'ไม่มีของ';
-  const { w, h } = gridOf(s);
-  if (!fits(s.skills, w, h, i, x, y, rot)) return 'วางตรงนี้ไม่ได้';
-  Object.assign(k, { x, y, rot });
-  return null;
+/** Move skill i up (-1) or down (+1) in the list. Order only matters for ties (top fires first). */
+export function moveSkill(s: RunState, i: number, dir: -1 | 1) {
+  const j = i + dir;
+  if (!s.skills[i] || !s.skills[j]) return;
+  [s.skills[i], s.skills[j]] = [s.skills[j], s.skills[i]];
 }
 
-/** Take block i off the grid into the bag. */
-export function unplace(s: RunState, i: number): string | null {
-  const k = s.skills[i];
-  if (!k) return 'ไม่มีของ';
-  if (k.x >= 0 && bag(s).length >= BAG_MAX) return 'กระเป๋าเต็ม';
-  Object.assign(k, { x: -1, y: -1 });
-  return null;
-}
-
-/** Only placed blocks fight. */
-export const toBuild = (s: RunState): Build => {
-  const { w, h } = gridOf(s);
-  return {
-    hero: s.hero, w, h,
-    skills: s.skills.filter((k) => k.x >= 0).map((k) => ({ ...k, bonus: k.bonus.map((b) => ({ ...b })) })),
-  };
-};
+export const toBuild = (s: RunState): Build => ({
+  hero: s.hero,
+  skills: s.skills.slice(0, slotsOf(s)).map((k) => ({ ...k })),
+});
 
 export function recordResult(s: RunState, won: boolean, info: Omit<LogEntry, 'day' | 'won'>) {
   s.log.push({ day: s.day, won, ...info });
@@ -263,10 +252,14 @@ export function recordResult(s: RunState, won: boolean, info: Omit<LogEntry, 'da
 
 export function chooseLastChance(s: RunState, opt: LastChanceOption) {
   if (s.phase !== 'lastchance') return;
-  if (opt === 'awaken') for (const k of s.skills) if (k.lv < AWAKEN_LV) k.lv = AWAKEN_LV;
+  if (opt === 'awaken') {
+    // every Lv1 skill moves to Lv2 on a random branch
+    const rng = new Rng(hashSeed(s.seed, 'awaken', s.day));
+    for (const k of s.skills) if (k.v === '') k.v = rng.pick(nextVariants(''));
+  }
   if (opt === 'supply') {
     s.gold += 8;
-    s.bonusRows += 1;
+    s.bonusSlots += 1;
   }
   if (opt === 'mark') {
     s.pendingMark = new Rng(hashSeed(s.seed, 'mark', s.day)).pick(MARKS);

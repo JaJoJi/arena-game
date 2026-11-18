@@ -1,9 +1,9 @@
 // Bots play thousands of fights → archetype + per-hero matchup matrices, and fight length per day.
 // Vision target: no matchup above ~65%.
-// Usage: npm run balance -- [buildsPerHero=100] [days=5,10,13] [--strict]
+// Usage: npm run balance -- [buildsPerHero=100] [days=3,5,10,13] [--strict]
 //   --strict exits 1 when a target is missed (for CI).
 import { aiBuild, randomAiBuild } from '../src/sim/bot';
-import { TPS, simulate } from '../src/sim/combat';
+import { TPS, fatigueStart, simulate } from '../src/sim/combat';
 import { HEROES } from '../src/sim/heroes';
 import { hashSeed } from '../src/sim/rng';
 import { ARCHES, type Build } from '../src/sim/types';
@@ -11,33 +11,40 @@ import { ARCHES, type Build } from '../src/sim/types';
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const STRICT = process.argv.includes('--strict');
 const N = Number(args[0] ?? 100);
-const DAYS = (args[1] ?? '5,10,13').split(',').map(Number);
+const DAYS = (args[1] ?? '3,5,10,13').split(',').map(Number);
 const LIMIT = 0.65;
 /** single hero vs hero pairs may lean a bit more (designed counters), archetypes may not */
 const HERO_LIMIT = 0.7;
 const SPREAD = 0.15;
 /** Fight length targets in seconds: [min, max] per day range. */
-export const lengthTarget = (day: number): [number, number] => (day <= 3 ? [9, 16] : day <= 7 ? [14, 24] : [20, 32]);
+export const lengthTarget = (day: number): [number, number] => (day <= 3 ? [7, 13] : day <= 7 ? [10, 18] : [15, 26]);
+/** Most fights should end by KO, not fatigue. */
+const FATIGUE_MAX = 0.2;
 
 const pct = (x: number) => ((x * 100).toFixed(0) + '%').padStart(7);
 const problems: string[] = [];
 
 // ---------------- fight length per day ----------------
-if (!process.argv.includes('--no-len')) console.log('\nFight length per day (random bot builds, 300 fights each)\n\nday   avg    p10    p90   target');
+if (!process.argv.includes('--no-len')) console.log('\nFight length per day (random bot builds, 300 fights each)\n\nday   avg    p10    p90   target     fatigue-ended');
 for (let day = 1; day <= 13 && !process.argv.includes('--no-len'); day++) {
   const lens: number[] = [];
+  let fat = 0;
   for (let i = 0; i < 300; i++) {
     const a = randomAiBuild(day, hashSeed('len-a', day, i));
     const b = randomAiBuild(day, hashSeed('len-b', day, i));
-    lens.push(simulate(a, b, hashSeed('len', day, i), day).ticks / TPS);
+    const r = simulate(a, b, hashSeed('len', day, i), day);
+    lens.push(r.ticks / TPS);
+    if (r.ticks >= fatigueStart(day)) fat++;
   }
   lens.sort((x, y) => x - y);
   const avg = lens.reduce((n, x) => n + x, 0) / lens.length;
   const [lo, hi] = lengthTarget(day);
   const ok = avg >= lo && avg <= hi;
   if (!ok) problems.push(`day ${day} avg fight ${avg.toFixed(1)}s (target ${lo}–${hi}s)`);
+  const fatShare = fat / 300;
+  if (fatShare > FATIGUE_MAX) problems.push(`day ${day}: ${Math.round(fatShare * 100)}% of fights end by fatigue (target ≤ ${FATIGUE_MAX * 100}%)`);
   console.log(
-    `${String(day).padStart(3)} ${avg.toFixed(1).padStart(6)}s ${lens[30].toFixed(1).padStart(5)}s ${lens[270].toFixed(1).padStart(5)}s   ${lo}–${hi}s ${ok ? '✔' : '✘'}`,
+    `${String(day).padStart(3)} ${avg.toFixed(1).padStart(6)}s ${lens[30].toFixed(1).padStart(5)}s ${lens[270].toFixed(1).padStart(5)}s   ${lo}–${hi}s ${ok ? '✔' : '✘'}   ${String(Math.round(fatShare * 100)).padStart(5)}% ${fatShare <= FATIGUE_MAX ? '✔' : '✘'}`,
   );
 }
 
@@ -121,7 +128,7 @@ for (const DAY of DAYS) {
   if (spread > SPREAD) problems.push(`day ${DAY}: hero spread ${(spread * 100).toFixed(0)} points`);
 
   console.log('\nExample builds:');
-  for (const h of HEROES) console.log(' ', h.id.padEnd(10), builds[h.id][0].skills.map((s) => `${s.id}${s.lv}`).join(' ') + `  (${builds[h.id][0].w}x${builds[h.id][0].h})`);
+  for (const h of HEROES) console.log(' ', h.id.padEnd(10), builds[h.id][0].skills.map((s) => `${s.id}${s.v ? "." + s.v : ""}`).join(' '));
 }
 
 console.log(problems.length ? `\n✘ ${problems.length} targets missed:\n  ` + problems.join('\n  ') : '\n✔ All targets met');
