@@ -1,4 +1,4 @@
-import { randomAiBuild } from '../sim/bot';
+import { autoArrange, randomAiBuild } from '../sim/bot';
 import { SIM_VERSION, cdTicks, simulate } from '../sim/combat';
 import { HASTE_BONUS, POWER_BONUS, activeBonuses, fits, matches, type Offer } from '../sim/grid';
 import { HEROES, HEROES_BY_ID } from '../sim/heroes';
@@ -39,6 +39,10 @@ let replayResult: CombatResult | null = null;
 let replay: ReplayRecord | null = null;
 let busy = false;
 let toast = '';
+/** block (index into run.skills) to play the rotate animation on after the next render */
+let animRot: number | null = null;
+/** screen positions of blocks before an auto-arrange, so they can slide to their new spots */
+let flipFrom: Map<number, DOMRect> | null = null;
 let names: [string, string] = ['', ''];
 /** selected block (index into run.skills) */
 let sel: number | null = null;
@@ -189,6 +193,7 @@ function render() {
   hideTip();
   $panel.innerHTML = (toast ? `<div class="toast">${esc(toast)}</div>` : '') + html;
   toast = '';
+  playBlockAnims();
   // selected skill (tap on mobile) shows the same colour highlight as hover
   if (view === 'shop' && sel !== null) highlightFor('g:' + sel);
   if (view === 'title') {
@@ -327,7 +332,8 @@ function renderShop() {
   <p class="muted">วันนี้ได้ +${inc.base}${inc.bonus ? ` และโบนัส +${inc.bonus}` : ''} · ${hero.name}: ${hero.passive}</p>
   <h3>ร้าน skill <button class="small" data-a="reroll" ${r.gold < R.REROLL ? 'disabled' : ''}>สุ่มใหม่ (${R.REROLL})</button></h3>
   <div class="shop">${shop}${expandCard(r)}</div>
-  <h3>ตาราง skill ${w}×${h} <small class="muted">ทุกตัวนับคูลดาวน์พร้อมกัน · วางให้ติดกับตัวที่โบนัสต้องการ แล้วตัวนั้นจะเรืองแสง</small></h3>
+  <h3>ตาราง skill ${w}×${h} <button class="small auto-btn" data-a="auto" ${r.skills.length ? '' : 'disabled'} title="จัดบล็อกให้โบนัสติดกันทำงานมากที่สุด">✨ จัดอัตโนมัติ</button>
+    <small class="muted">ทุกตัวนับคูลดาวน์พร้อมกัน · วางให้ติดกับตัวที่โบนัสต้องการ แล้วตัวนั้นจะเรืองแสง</small></h3>
   <div class="pack">
     ${gridHTML(r.skills, w, h, { interactive: true, selected: sel ?? undefined })}
     <div class="side">
@@ -754,6 +760,16 @@ function onClick(ev: Event) {
     case 'desel':
       sel = null;
       break;
+    case 'auto': {
+      flipFrom = blockRects();
+      const res = autoArrange(run!);
+      sel = null;
+      toast = !res.changed
+        ? `จัดดีที่สุดแล้ว · โบนัสทำงาน ${res.after} อัน`
+        : `จัดใหม่แล้ว · โบนัสทำงาน ${res.before} → ${res.after} อัน`;
+      if (!res.changed) flipFrom = null;
+      break;
+    }
     case 'expand':
       err = R.buyExpand(run!);
       break;
@@ -891,7 +907,10 @@ function onContextMenu(ev: MouseEvent) {
     // right-click while dragging rotates the block in hand
     ev.preventDefault();
     drag.rot = ((drag.rot + 1) % 4) as Rot;
-    if (drag.ghost) drag.ghost.innerHTML = pieceHTML({ ...run.skills[drag.i], rot: drag.rot });
+    if (drag.ghost) {
+      drag.ghost.innerHTML = pieceHTML({ ...run.skills[drag.i], rot: drag.rot });
+      spin(drag.ghost.querySelector('.blk'));
+    }
     return;
   }
   const el = (ev.target as Element).closest?.('[data-blk]') as HTMLElement | SVGElement | null;
@@ -906,12 +925,57 @@ function onContextMenu(ev: MouseEvent) {
   render();
 }
 
+// ---------- block animations ----------
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** Restart the rotate animation on a block element. */
+function spin(el: Element | null) {
+  if (!el || reduceMotion()) return;
+  el.classList.remove('rot-anim');
+  void (el as HTMLElement).getBoundingClientRect(); // restart the CSS animation
+  el.classList.add('rot-anim');
+  el.addEventListener('animationend', () => el.classList.remove('rot-anim'), { once: true });
+}
+
+/** Current on-screen box of every block in the grid and the bag, by skill index. */
+function blockRects() {
+  const m = new Map<number, DOMRect>();
+  document.querySelectorAll<SVGElement>('[data-blk]').forEach((el) => m.set(Number(el.dataset.blk), el.getBoundingClientRect()));
+  return m;
+}
+
+/** After a render: spin the rotated block, slide auto-arranged blocks from where they were. */
+function playBlockAnims() {
+  if (animRot !== null) {
+    document.querySelectorAll(`[data-blk="${animRot}"]`).forEach((el) => spin(el));
+    animRot = null;
+  }
+  if (flipFrom) {
+    const from = flipFrom;
+    flipFrom = null;
+    if (reduceMotion()) return;
+    document.querySelectorAll<SVGElement>('[data-blk]').forEach((el, n) => {
+      const a = from.get(Number(el.dataset.blk));
+      const b = el.getBoundingClientRect();
+      if (!a) return;
+      const dx = a.left - b.left;
+      const dy = a.top - b.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      el.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)`, opacity: 0.6 }, { transform: 'translate(0, 0)', opacity: 1 }],
+        { duration: 420, delay: n * 35, easing: 'cubic-bezier(.2,.8,.2,1.15)', fill: 'backwards' },
+      );
+    });
+  }
+}
+
 // ---------- grid: tap, drag, rotate ----------
 function rotateSelected(): string | null {
   const r = run;
   if (!r || sel === null) return null;
   const k = r.skills[sel];
   const rot = ((k.rot + 1) % 4) as Rot;
+  animRot = sel;
   if (k.x < 0) {
     k.rot = rot;
     return null;
@@ -1047,7 +1111,10 @@ function onKey(ev: KeyboardEvent) {
   if (drag?.moved && run) {
     // rotate while dragging; the new rotation is used on drop
     drag.rot = ((drag.rot + 1) % 4) as Rot;
-    if (drag.ghost) drag.ghost.innerHTML = pieceHTML({ ...run.skills[drag.i], rot: drag.rot });
+    if (drag.ghost) {
+      drag.ghost.innerHTML = pieceHTML({ ...run.skills[drag.i], rot: drag.rot });
+      spin(drag.ghost.querySelector('.blk'));
+    }
     return;
   }
   toast = rotateSelected() ?? '';

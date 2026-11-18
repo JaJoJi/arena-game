@@ -1,7 +1,7 @@
 import { HEROES, HEROES_BY_ID } from './heroes';
 import { Rng, hashSeed } from './rng';
-import { DX, DY, cellsOf, footprint, matches, shapeSize } from './grid';
-import { MAX_LV, buy, gridOf, newRun, priceOf, reroll, toBuild, PRICE, REROLL, type RunState } from './run';
+import { DX, DY, activeBonuses, cellsOf, footprint, matches, shapeSize } from './grid';
+import { BAG_MAX, MAX_LV, buy, gridOf, newRun, priceOf, reroll, toBuild, PRICE, REROLL, type RunState } from './run';
 import { SKILLS } from './skills';
 import { ARCHES, type Archetype, type Build, type Rot } from './types';
 
@@ -64,10 +64,70 @@ const BONUS_W = { trigger: 2, power: 1.5, haste: 1.2, dmg: 1.5, shield: 1 } as c
 
 /** Greedy packing: biggest blocks first, each at the spot that turns on the most connect bonuses. */
 export function arrange(s: RunState) {
+  arrangeOrder(s, biggestFirst(s));
+}
+
+const biggestFirst = (s: RunState) =>
+  s.skills.map((_, i) => i).sort((a, b) => shapeSize(s.skills[b].shape) - shapeSize(s.skills[a].shape) || a - b);
+
+/**
+ * Score of the current layout: every placed block counts far more than bonuses (never leave a skill out to win a
+ * bonus), then the weight of every active connect bonus. -Infinity when the bag would overflow.
+ */
+export function layoutScore(s: RunState): number {
   const { w, h } = gridOf(s);
-  const order = s.skills
-    .map((k, i) => i)
-    .sort((a, b) => shapeSize(s.skills[b].shape) - shapeSize(s.skills[a].shape) || a - b);
+  const bagged = s.skills.filter((k) => k.x < 0).length;
+  if (bagged > BAG_MAX) return -Infinity;
+  let score = (s.skills.length - bagged) * 1000;
+  for (const a of activeBonuses(s.skills, w, h)) score += BONUS_W[a.b.e] * 10;
+  return score;
+}
+
+export interface AutoResult {
+  /** active connect bonuses before / after */
+  before: number;
+  after: number;
+  /** false when the current layout was already the best found (nothing moved) */
+  changed: boolean;
+}
+
+/**
+ * Auto-arrange for players: run the greedy packing with the biggest-first order and many seeded shuffles,
+ * keep the layout with the best score. Never returns a worse layout than the current one. Deterministic.
+ */
+export function autoArrange(s: RunState, tries = 80): AutoResult {
+  const { w, h } = gridOf(s);
+  const snapshot = () => s.skills.map((k) => ({ x: k.x, y: k.y, rot: k.rot }));
+  const restore = (l: { x: number; y: number; rot: Rot }[]) => l.forEach((p, i) => Object.assign(s.skills[i], p));
+  const original = snapshot();
+  const before = activeBonuses(s.skills, w, h).length;
+  let best = original;
+  let bestScore = layoutScore(s);
+  const rng = new Rng(hashSeed(s.seed, s.day, s.skills.length, 'auto'));
+  for (let t = 0; t < tries; t++) {
+    let order = biggestFirst(s);
+    if (t > 0) {
+      // shuffle, but keep a bias towards big blocks first so everything still fits
+      order = order
+        .map((i, rank) => ({ i, key: rank + rng.next() * s.skills.length * (t % 3 === 0 ? 0.5 : 1.5) }))
+        .sort((a, b) => a.key - b.key)
+        .map((x) => x.i);
+    }
+    arrangeOrder(s, order);
+    const sc = layoutScore(s);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = snapshot();
+    }
+  }
+  restore(best);
+  const changed = best !== original;
+  return { before, after: activeBonuses(s.skills, w, h).length, changed };
+}
+
+/** Greedy packing in a given order: each block goes to the spot (and rotation) that turns on the most bonuses. */
+function arrangeOrder(s: RunState, order: number[]) {
+  const { w, h } = gridOf(s);
   for (const k of s.skills) Object.assign(k, { x: -1, y: -1 });
   // occupancy of blocks placed so far (blocks are placed one by one, so this only grows)
   const g = new Int16Array(w * h).fill(-1);
