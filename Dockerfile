@@ -24,7 +24,7 @@ RUN mkdir -p data && chown -R node:node /app
 USER node
 ENV NODE_ENV=production PORT=8787
 EXPOSE 8787
-# saved builds, fights and replays (data/db.json) survive restarts when this is a volume
-VOLUME ["/app/data"]
+# Saved builds, fights and replays are written to /app/data/db.json. Mount a volume there to keep them
+# (docker compose does; on Railway attach a volume at /app/data). No VOLUME line: Railway does not allow it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- "http://127.0.0.1:${PORT}/" >/dev/null || exit 1
 CMD ["npx", "tsx", "src/server/index.ts"]
