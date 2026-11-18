@@ -4,14 +4,65 @@ Proof of concept for the async auto-battler in the vision doc: pick a hero, buy 
 pack them into a grid (placement is the combo), fight other players' saved builds from the same day,
 win 8 before HP 20 runs out. Full combat design: see the combat doc and `docs/ROADMAP.md`.
 
-## Run
+## Two versions
+
+This repo holds two playable versions of the game on two branches. **This branch is the grid version (shaped blocks on a grid, connect bonuses).**
+
+| Version | Branch | Docker image | Port when hosted |
+|---|---|---|---|
+| Grid: skills are shaped blocks packed into a grid, connect bonuses, chains, engines, auto-arrange | `phase1-combat-character` | `arena-grid` | 8787 |
+| List: skills in a vertical list, all firing in parallel, Lv1 → Lv2 → Lv3 skill tree, 5-offer shop | `skill-list` | `arena-list` | 8788 |
+
+Switch versions with `git checkout phase1-combat-character` or `git checkout skill-list`, then run as below.
+
+## How to run
+
+### Option A: on your computer (for development)
+
+Needs **Node.js 22 or newer** (https://nodejs.org) and npm.
 
 ```bash
+git clone <repo-url> arena_game
+cd arena_game
+git checkout phase1-combat-character
 npm install
-npm run dev          # server :8787 + Vite client :5173 → open http://localhost:5173
+npm run dev          # game server on :8787 + live-reload client on :5173
 ```
 
-Production-style: `npm run build && npm start` → http://localhost:8787 (server also serves the built client).
+Open **http://localhost:5173**. Code changes reload by themselves.
+
+To run it the way it is hosted (one server that also serves the built page):
+
+```bash
+npm run build
+npm start            # open http://localhost:8787
+```
+
+### Option B: with Docker (for hosting)
+
+Needs Docker (Docker Desktop on Windows / macOS). Each version is one image with the server and the web page inside.
+
+```bash
+docker build -t arena-grid .                                   # on this branch
+docker run -d -p 8787:8787 -v arena-grid-data:/app/data --name arena-grid arena-grid
+```
+
+Open **http://localhost:8787**. Saved builds, fights and replays stay in the `arena-grid-data` volume.
+
+**Both versions at once** (grid on 8787, list on 8788): build both images (one on each branch), then
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d     # stop with: docker compose -f deploy/docker-compose.yml down
+```
+
+Copying the images to another server, updating, logs, wiping data and HTTPS notes: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**.
+
+### First time in the game
+
+A tutorial pops up the first time the game is opened in a browser (8 slides). Reopen it any time with
+**? วิธีเล่น** at the top right. Your run is saved in your browser, so you can close the tab and continue later.
+
+## Developer commands
 
 | Command | What it does |
 |---|---|
