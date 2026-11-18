@@ -59,9 +59,41 @@ docker compose -f deploy/docker-compose.yml up -d     # stop with: docker compos
 
 Copying the images to another server, updating, logs, wiping data and HTTPS notes: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**.
 
-### Option C: Railway
+### Option C: Railway (hosting from GitHub, with HTTPS)
 
-Deploy straight from GitHub, one Railway service per branch: **[deploy/RAILWAY.md](deploy/RAILWAY.md)**.
+Railway builds the repo's `Dockerfile` straight from GitHub. Make **one Railway service per version**:
+
+| Railway service | Branch | Version |
+|---|---|---|
+| `arena-list` | `skill-list` | list version |
+| `arena-grid` | `phase1-combat-character` | grid version |
+
+**Steps (repeat for each version):**
+
+1. Sign in at https://railway.com → **New Project → Deploy from GitHub repo** → choose `JaJoJi/arena-game`
+   (the first time, Railway asks you to let it read your GitHub repos).
+2. Open the service → **Settings → Source → Branch** → pick the branch from the table. Railway detects the
+   `Dockerfile` and builds it (about 1–2 minutes).
+3. **Settings → Networking → Generate Domain**. If it asks for a port, type **8787**. You get a link like
+   `https://arena-list-production.up.railway.app` with HTTPS included: share that link with players.
+4. **Keep saved data across redeploys (recommended):**
+   - Right-click the service (or **+ Create → Volume**) → add a **Volume** with mount path **`/app/data`**.
+   - **Variables → New Variable**: `RAILWAY_RUN_UID` = `0` (Railway volumes belong to root; without this the game
+     can't write its save file).
+5. *(Optional)* **Settings → Deploy → Healthcheck Path** = `/`.
+
+For the second version: in the same project click **+ Create → GitHub Repo**, pick the same repo, and set the other
+branch in step 2.
+
+**After that:**
+
+- Every `git push` to a branch redeploys that version automatically.
+- Keep each service at **1 replica**: all saved builds live in one server process.
+- Without a volume the game still works, but opponents' saved builds and replay links reset on every deploy
+  (players' own runs are saved in their browser either way).
+- Logs: open the service → **Deployments → View logs**. A line `could not save …` means step 4 is missing.
+
+More detail: [deploy/RAILWAY.md](deploy/RAILWAY.md).
 
 ### First time in the game
 
