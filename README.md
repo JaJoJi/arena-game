@@ -4,6 +4,8 @@ Proof of concept for the async auto-battler in the vision doc: pick a hero, buy 
 pack them into a grid (placement is the combo), fight other players' saved builds from the same day,
 win 8 before HP 20 runs out. Full combat design: see the combat doc and `docs/ROADMAP.md`.
 
+Repository: **https://github.com/JaJoJi/arena-game**
+
 ## Two versions
 
 This repo holds two playable versions of the game on two branches. **This branch is the grid version (shaped blocks on a grid, connect bonuses).**
@@ -22,7 +24,7 @@ Switch versions with `git checkout phase1-combat-character` or `git checkout ski
 Needs **Node.js 22 or newer** (https://nodejs.org) and npm.
 
 ```bash
-git clone <repo-url> arena_game
+git clone https://github.com/JaJoJi/arena-game.git arena_game
 cd arena_game
 git checkout phase1-combat-character
 npm install
