@@ -59,6 +59,10 @@ docker compose -f deploy/docker-compose.yml up -d     # stop with: docker compos
 
 Copying the images to another server, updating, logs, wiping data and HTTPS notes: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**.
 
+### Option C: Railway
+
+Deploy straight from GitHub, one Railway service per branch: **[deploy/RAILWAY.md](deploy/RAILWAY.md)**.
+
 ### First time in the game
 
 A tutorial pops up the first time the game is opened in a browser (8 slides). Reopen it any time with

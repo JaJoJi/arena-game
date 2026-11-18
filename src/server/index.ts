@@ -66,8 +66,13 @@ function save() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(DB_FILE, JSON.stringify(db));
+    // a failed write (no volume, no permission, disk full) must not take the server down: log it and keep playing
+    try {
+      mkdirSync(DATA_DIR, { recursive: true });
+      writeFileSync(DB_FILE, JSON.stringify(db));
+    } catch (e) {
+      console.error('could not save', DB_FILE, (e as Error).message);
+    }
   }, 300);
 }
 
