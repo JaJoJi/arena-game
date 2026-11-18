@@ -253,3 +253,30 @@ ol.build li::before { flex: none; min-width: 16px; }
 .kwlist { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
 .kwlist li { margin: 2px 0; }
 .kwlist b { color: var(--text, #e6edf3); }
+
+/* ---------- first-run tutorial (slide panel) ---------- */
+header { display: flex; align-items: center; gap: 8px; }
+.tut-open { margin-left: auto; }
+.tut-backdrop {
+  position: fixed; inset: 0; z-index: 100; background: rgba(5, 7, 10, 0.78);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.tut {
+  position: relative; width: min(520px, 100%); max-height: calc(100vh - 32px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+.tut-x { position: absolute; top: 10px; right: 10px; }
+.tut-slide { min-height: 260px; }
+.tut-art { font-size: 44px; text-align: center; margin: 6px 0 10px; line-height: 1.2; }
+.tut-art .kw { font-size: 18px; padding: 3px 10px; }
+.tut-title { text-align: center; color: var(--accent); margin: 4px 0 10px; }
+.tut-body p { margin: 8px 0; line-height: 1.6; }
+.tut-dots { display: flex; justify-content: center; gap: 6px; margin: 12px 0; }
+.tut-dot { width: 10px; height: 10px; padding: 0; border-radius: 50%; background: var(--line); border: none; min-height: 0; }
+.tut-dot.on { background: var(--accent); }
+.tut-nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tut-tree { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; font-size: 15px; }
+.tut-tree b { background: #0b0e13; border: 1px solid var(--accent); border-radius: 8px; padding: 4px 8px; color: var(--accent); }
+.tut-tree i { color: var(--muted); font-style: normal; }
+@media (max-width: 520px) { .tut { padding: 18px 14px 12px; } .tut-art { font-size: 36px; } }
