@@ -7,7 +7,7 @@ import { hashSeed } from '../sim/rng';
 import * as R from '../sim/run';
 import { ARCH_NAME, KEYWORDS, SKILLS, chipsOf, lvOf, nextVariants, nodeOf, type Keyword, type Variant } from '../sim/skills';
 import type { BlockStat, Build, CombatEvent, CombatResult, Rot, SkillInstance } from '../sim/types';
-import { RARE_NAMES, RARITY_NAME, lookRarity, rareGallery, renderChibi, rollLook } from './chibi';
+import { memeGallery, renderChibi, rollLook } from './chibi';
 import { BONUS_ICON, bonusText, dropOrigin, footprintAt, gridHTML, installPatterns, pieceHTML } from './gridView';
 import { api, type FightResponse, type ReplayRecord } from './api';
 import type { CombatScene } from './combatScene';
@@ -213,13 +213,6 @@ function heroArt(id: string, cls = '', look = 0) {
   return `<span class="hero-art ${cls}" role="img" aria-label="${HEROES_BY_ID[id]?.name ?? id}">${heroSvgs[k]}</span>`;
 }
 
-/** Badge for a rare look: tier + what is rare. Empty for a common look. */
-function lookBadge(hero: string, seed: number) {
-  const { tier, parts } = lookRarity(rollLook(hero, seed));
-  if (tier === 'common') return '';
-  return `<span class="rarity r-${tier}" title="${L('ลุคหายาก: สุ่มได้ตอนเริ่มรอบ ไม่มีผลกับการสู้', 'Rare look: rolled at the start of the run, no effect on fights')}">✦ ${RARITY_NAME[tier]()} · ${parts.map((x) => RARE_NAMES[x]()).join(' + ')}</span>`;
-}
-
 function streakText(s: number) {
   if (s >= 2) return L(`ชนะติด ${s}`, `${s} wins in a row`);
   if (s <= -2) return L(`แพ้ติด ${-s}`, `${-s} losses in a row`);
@@ -303,7 +296,7 @@ function renderTitle() {
   ${runActive() ? '' : `<p class="muted">${L(`รอบนี้มีให้เลือก ${R.HERO_CHOICES} ตัวจากคนละสาย (ดูฮีโร่ทั้งหมดได้ที่หอฮีโร่ในเมือง)`, `This run offers ${R.HERO_CHOICES} heroes from different styles (see them all in the Hero Hall in town)`)}</p>`}
   <div class="heroes">${(runActive() ? [] : R.heroChoices((nextSeed ??= randSeed())).map((id) => HEROES_BY_ID[id])).map(
     (h) => `<button class="hero arch-${h.arch}" data-a="start" data-i="${h.id}">
-      ${heroArt(h.id)}
+      ${heroArt(h.id, '', R.lookFor(nextSeed!, h.id))}
       <b>${h.name}</b><span class="tag">${ARCH_NAME[h.arch]}</span>
       <span>${h.style}</span>
       <span>${h.passive}</span>
@@ -386,7 +379,6 @@ function renderShop() {
     ${streakText(r.streak) ? `<span>${streakText(r.streak)}</span>` : ''}
     <span class="stats-right">${concedeHTML()}</span>
   </div>
-  ${lookBadge(r.hero, R.lookOf(r)) ? `<p>${lookBadge(r.hero, R.lookOf(r))}</p>` : ''}
   <p class="muted">${L('วันนี้ได้', 'Income today')} +${inc.base}${inc.bonus ? ` ${L('และโบนัส', 'and bonus')} +${inc.bonus}` : ''} · ${hero.name}: ${hero.passive}</p>
   <h3>${L('ร้าน skill', 'Skill shop')} <button class="small" data-a="reroll" ${r.gold < R.REROLL ? 'disabled' : ''}>${L('สุ่มใหม่', 'Reroll')} (${R.REROLL})</button></h3>
   <div class="shop">${shop}${expandCard(r)}</div>
@@ -782,8 +774,6 @@ function onClick(ev: Event) {
         if (!R.heroChoices(seed).includes(arg)) break; // only an offered hero can start a run
         nextSeed = null;
         run = R.newRun(arg, seed, uid());
-        const { tier, parts } = lookRarity(rollLook(run.hero, R.lookOf(run)));
-        if (tier !== 'common') toast = `✦ ${L('ได้ลุค', 'You rolled a')} ${RARITY_NAME[tier]()}${L('!', ' look!')} ${parts.map((x) => RARE_NAMES[x]()).join(' + ')}`;
       }
       view = 'shop';
       break;
@@ -1204,8 +1194,8 @@ export function startUI(st: Stage) {
   scene = st.combat;
   onLang(() => render());
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('looks')) {
-    // dev only: every rare look on one hero, to check the art (?looks or ?looks=witch)
-    $panel.innerHTML = `<h2>Rare looks</h2><div style="display:flex;flex-wrap:wrap;gap:8px">${rareGallery(new URLSearchParams(location.search).get('looks') || 'knight')}</div>`;
+    // dev only: every meme face and prop on one hero, to check the art (?looks or ?looks=witch)
+    $panel.innerHTML = `<h2>Meme faces and props</h2><div style="display:flex;flex-wrap:wrap;gap:8px">${memeGallery(new URLSearchParams(location.search).get('looks') || 'knight')}</div>`;
     return;
   }
   st.town.onSelect = (id) => {

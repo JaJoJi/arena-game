@@ -38,8 +38,8 @@ export interface Look {
   hero: string;
   parts: Record<Slot, string>;
   pal: Pal;
-  /** rare cosmetics (rolled on their own, much less often than normal parts) */
-  rare?: { face?: string; extra?: string; shiny?: boolean };
+  /** meme face (replaces eyes + mouth) and prop; normal odds like every other part */
+  meme?: { face?: string; extra?: string };
 }
 
 // ---------------------------------------------------------------- parts
@@ -222,7 +222,7 @@ const EARS = ['bunny', 'perky', 'tipped', 'floppy'];
 const EYES = ['dot', 'sparkle', 'brave', 'happy', 'sleepy'];
 const MOUTHS = ['smile', 'cat', 'open', 'fang'];
 
-// ---------------------------------------------------------------- rare cosmetics
+// ---------------------------------------------------------------- meme faces and props
 // Meme-style expressions and props, drawn in our own mochi style (no copied meme characters or images).
 
 const W_MOUTH = `<path d="M92 113 Q96 119 100 114 Q104 119 108 113" fill="none" ${st(3.4)}/>`;
@@ -241,8 +241,8 @@ const star5 = (x: number, y: number, r: number, fill: string) => {
   return `<path d="${d}Z" fill="${fill}" ${st(2.4)}/>`;
 };
 
-/** Rare faces: replace the eyes and mouth. */
-const RARE_FACE: Record<string, () => string> = {
+/** Meme faces: replace the eyes and mouth. */
+const MEME_FACE: Record<string, () => string> = {
   uwu: () => EYE_X.map((x) => `<path d="M${x - 7} 94 L${x - 7} 100 Q${x} 110 ${x + 7} 100 L${x + 7} 94" fill="none" ${st(4)}/>`).join('') + W_MOUTH + BLUSH_LINES,
   owo: () => EYE_X.map((x) => `<circle cx="${x}" cy="101" r="9.5" fill="#fff" ${st(3.5)}/><circle cx="${x}" cy="102" r="4.8" fill="${L}"/>`).join('') + W_MOUTH,
   smug: () =>
@@ -270,8 +270,8 @@ const RARE_FACE: Record<string, () => string> = {
   shock: () => EYE_X.map((x) => `<circle cx="${x}" cy="100" r="9" fill="#fff" ${st(3)}/><circle cx="${x}" cy="100" r="2.2" fill="${L}"/>`).join('') + `<ellipse cx="100" cy="119" rx="5.5" ry="7.5" fill="#5a2a3a" ${st(3)}/>`,
 };
 
-/** Rare props on the face, drawn over the headgear. */
-const RARE_EXTRA: Record<string, () => string> = {
+/** Props on the face, drawn over the headgear. */
+const MEME_PROP: Record<string, () => string> = {
   shades: () => {
     const lens = (x0: number) => `<path d="M${x0} 93 h32 v8 h-4 v4 h-4 v4 h-8 v-4 h-4 v-4 h-4 v-4 h-4 v-4 h-4 Z" fill="#141018"/>`;
     return `<rect x="40" y="93" width="120" height="5" fill="#141018"/>${lens(62)}${lens(106)}` +
@@ -287,40 +287,26 @@ const RARE_EXTRA: Record<string, () => string> = {
     `<path d="M65 99 L42 95 M135 99 L158 95" stroke="${L}" stroke-width="3.5" stroke-linecap="round"/>`,
 };
 
-/** Chance per run (independent rolls): rare face, rare prop, golden "shiny" mochi. */
-export const RARE_RATES = { face: 0.07, extra: 0.06, shiny: 0.002 };
+/** Share of looks with a prop (the rest have none); each of the 7 props is equally likely. */
+export const PROP_CHANCE = 0.5;
 
-const SHINY: Partial<Pal> = { body: '#ffe7a0', inner: '#ffb36b', trim: '#fff3c4', metal: '#ffd95e' };
-
-export const RARE_NAMES: Record<string, () => string> = {
+export const MEME_NAMES: Record<string, () => string> = {
   uwu: () => 'UwU', owo: () => 'OwO', smug: () => tr('หน้ากวน', 'Smug face'), sideeye: () => tr('มองค้อน', 'Side-eye'),
   cry: () => tr('ขำทั้งน้ำตา', 'Crying laughing'), hearts: () => tr('ตาหัวใจ', 'Heart eyes'), derp: () => tr('หน้าเอ๋อ', 'Derp face'),
   xd: () => 'XD', lenny: () => tr('หน้าเลนนี่', 'Lenny face'), stars: () => tr('ตาวิบวับ', 'Star eyes'), sweat: () => tr('เหงื่อตก', 'Nervous sweat'),
   shock: () => tr('ช็อก', 'Shocked'),
   shades: () => tr('แว่นเท่ (Deal with it)', 'Deal-with-it shades'), monocle: () => tr('แว่นข้างเดียว', 'Monocle'), mustache: () => tr('หนวดผู้ดี', 'Fancy mustache'),
   bandage: () => tr('พลาสเตอร์แปะแก้ม', 'Cheek bandage'), clown: () => tr('จมูกตัวตลก', 'Clown nose'), bubble: () => tr('ฟองน้ำมูก', 'Snot bubble'),
-  nerd: () => tr('แว่นเนิร์ด', 'Nerd glasses'), shiny: () => tr('โมจิทองคำ', 'Golden mochi'),
+  nerd: () => tr('แว่นเนิร์ด', 'Nerd glasses'),
 };
 
-export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
-export function lookRarity(look: Look): { tier: Rarity; parts: string[] } {
-  const r = look.rare ?? {};
-  const parts = [r.shiny ? 'shiny' : '', r.face ?? '', r.extra ?? ''].filter(Boolean);
-  const tier: Rarity = r.shiny ? 'legendary' : r.face && r.extra ? 'epic' : parts.length ? 'rare' : 'common';
-  return { tier, parts };
-}
-export const RARITY_NAME: Record<Rarity, () => string> = {
-  common: () => tr('ธรรมดา', 'Common'), rare: () => tr('หายาก', 'Rare'), epic: () => tr('หายากมาก', 'Epic'), legendary: () => tr('ตำนาน', 'Legendary'),
-};
-
-/** Every rare item on one hero, for the dev gallery (?looks). */
-export function rareGallery(hero = 'knight') {
+/** Every meme face and prop on one hero, for the dev gallery (?looks). */
+export function memeGallery(hero = 'knight') {
   const base = rollLook(hero, 0);
   const cell = (look: Look, name: string) => `<figure style="margin:0;text-align:center;width:120px">${renderChibi(look, 'idle', 120)}<figcaption class="small">${name}</figcaption></figure>`;
   return [
-    ...Object.keys(RARE_FACE).map((f) => cell({ ...base, rare: { face: f } }, RARE_NAMES[f]())),
-    ...Object.keys(RARE_EXTRA).map((e) => cell({ ...base, rare: { extra: e } }, RARE_NAMES[e]())),
-    cell({ ...base, pal: { ...base.pal, ...SHINY }, parts: { ...base.parts, fx: 'sparkles' }, rare: { shiny: true } }, RARE_NAMES.shiny()),
+    ...Object.keys(MEME_FACE).map((f) => cell({ ...base, meme: { face: f } }, MEME_NAMES[f]())),
+    ...Object.keys(MEME_PROP).map((e) => cell({ ...base, meme: { extra: e } }, MEME_NAMES[e]())),
   ].join('');
 }
 
@@ -358,18 +344,16 @@ export function rollLook(hero: string, seed: number): Look {
     fx: pick(c.fx),
     ...c.icon,
   };
-  let pal: Pal = { body: pick(BODY), inner: pick(INNER), outfit, trim, metal: pick(METAL), accent: c.accent };
-  // rare cosmetics use their own random stream, so adding them never changed anyone's normal look
+  const pal: Pal = { body: pick(BODY), inner: pick(INNER), outfit, trim, metal: pick(METAL), accent: c.accent };
+  // Face: the 5 normal eyes and the 12 meme faces are one pool, every face equally likely.
+  // Uses its own random stream so the parts above keep their odds.
   const rr = rng(seed ^ 0x9e3779b9);
-  const rare: NonNullable<Look['rare']> = {};
-  if (rr.next() < RARE_RATES.face) rare.face = rr(Object.keys(RARE_FACE));
-  if (rr.next() < RARE_RATES.extra) rare.extra = rr(Object.keys(RARE_EXTRA));
-  if (rr.next() < RARE_RATES.shiny) {
-    rare.shiny = true;
-    pal = { ...pal, ...SHINY };
-    parts.fx = 'sparkles';
-  }
-  return { hero, parts, pal, ...(rare.face || rare.extra || rare.shiny ? { rare } : {}) };
+  const faces = Object.keys(MEME_FACE);
+  const meme: NonNullable<Look['meme']> = {};
+  const fi = Math.floor(rr.next() * (EYES.length + faces.length));
+  if (fi >= EYES.length) meme.face = faces[fi - EYES.length];
+  if (rr.next() < PROP_CHANCE) meme.extra = rr(Object.keys(MEME_PROP));
+  return { hero, parts, pal, ...(meme.face || meme.extra ? { meme } : {}) };
 }
 
 // ---------------------------------------------------------------- render
@@ -386,10 +370,10 @@ export function renderChibi(look: Look, pose: ChibiPose = 'idle', size?: number)
   const hit = pose === 'hit';
   const part = (k: Slot) => (P[k][q[k]] ?? P[k][Object.keys(P[k])[0]]).d(p);
   const ear = P.ears[q.ears] ?? P.ears.bunny;
-  const face = look.rare?.face && RARE_FACE[look.rare.face];
+  const face = look.meme?.face && MEME_FACE[look.meme.face];
   const eyes = hit ? `<path d="M70 94 L84 101 L70 108 M130 94 L116 101 L130 108" fill="none" ${st(4)}/>` : face ? face() : part('eyes');
   const mouth = hit ? P.mouth.wobble.d(p) : face ? '' : part('mouth');
-  const extra = look.rare?.extra && RARE_EXTRA[look.rare.extra] ? RARE_EXTRA[look.rare.extra]() : '';
+  const extra = look.meme?.extra && MEME_PROP[look.meme.extra] ? MEME_PROP[look.meme.extra]() : '';
   const layers = [
     part('back'),
     ear.front ? '' : ear.d(p),
