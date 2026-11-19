@@ -31,6 +31,8 @@ export interface SkillInstance {
 export interface Build {
   hero: string;
   skills: SkillInstance[];
+  /** cosmetic look seed for the chibi art (colours, ears, face, outfit); never read by the sim */
+  look?: number;
 }
 
 export type Side = 0 | 1;

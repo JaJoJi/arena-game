@@ -99,7 +99,8 @@ function validateBuild(x: unknown, day: number): Build | string {
     });
   }
   if (new Set(skills.map((s) => s.id)).size !== skills.length) return 'duplicate skill';
-  return { hero: b.hero, skills };
+  const look = Number.isInteger(b.look) && b.look! > 0 && b.look! < 2 ** 32 ? b.look : undefined;
+  return { hero: b.hero, skills, ...(look ? { look } : {}) };
 }
 
 const expected = (ra: number, rb: number) => 1 / (1 + Math.pow(10, (rb - ra) / 400));

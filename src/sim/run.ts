@@ -223,9 +223,13 @@ export function moveSkill(s: RunState, i: number, dir: -1 | 1) {
   [s.skills[i], s.skills[j]] = [s.skills[j], s.skills[i]];
 }
 
+/** Each run rolls a fresh look for its hero (cosmetic only); derived from the run seed so old saves get one too. */
+export const lookOf = (s: RunState) => hashSeed(s.seed, 'look') || 1;
+
 export const toBuild = (s: RunState): Build => ({
   hero: s.hero,
   skills: s.skills.slice(0, slotsOf(s)).map((k) => ({ ...k })),
+  look: lookOf(s),
 });
 
 export function recordResult(s: RunState, won: boolean, info: Omit<LogEntry, 'day' | 'won'>) {

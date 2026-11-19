@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import { HEROES } from '../sim/heroes';
-import { makeTextures } from './sprites';
 import { drawTownBackdrop, FOLK_COLORS, makeTownArt, R, RABBIT } from './townArt';
 import { BUILDINGS, BUILDING_BY_ID, RABBIT_X, WORLD_W } from './townData';
 import { ZOOM } from './view';
@@ -48,7 +47,6 @@ export class TownScene extends Phaser.Scene {
   }
 
   create() {
-    makeTextures(this);
     makeTownArt(this);
     const cam = this.cameras.main;
     cam.setOrigin(0, 0).setZoom(ZOOM); // scroll is clamped by hand, see clamp()

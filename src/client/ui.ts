@@ -7,7 +7,7 @@ import * as R from '../sim/run';
 import { HASTE_BONUS, POWER_BONUS, activeBonuses, bonusTotals, bonusValue, matches } from '../sim/links';
 import { ARCH_NAME, KEYWORDS, SKILLS, chipsOf, lvOf, nextVariants, nodeOf, type Keyword, type Variant } from '../sim/skills';
 import type { BlockStat, Bonus, Build, CombatEvent, CombatResult, SkillInstance } from '../sim/types';
-import { HERO_PX, drawHero } from './sprites';
+import { renderChibi, rollLook } from './chibi';
 import { api, type FightResponse, type ReplayRecord } from './api';
 import type { CombatScene } from './combatScene';
 import { BUILDINGS, BUILDING_BY_ID } from './townData';
@@ -235,23 +235,12 @@ function tipFor(key: string): string {
   return '';
 }
 
-/** Hero portrait: a 2-frame strip (idle + breathing) as a data URL, animated with CSS steps. Cached. */
-const heroStrips: Record<string, string> = {};
-function heroArt(id: string, cls = '') {
-  if (!heroStrips[id]) {
-    const strip = document.createElement('canvas');
-    strip.width = HERO_PX * 2;
-    strip.height = HERO_PX;
-    const sg = strip.getContext('2d')!;
-    ([0, 1] as const).forEach((f) => {
-      const one = document.createElement('canvas');
-      one.width = one.height = HERO_PX;
-      drawHero(one.getContext('2d')!, id, f);
-      sg.drawImage(one, f * HERO_PX, 0);
-    });
-    heroStrips[id] = strip.toDataURL();
-  }
-  return `<span class="hero-art ${cls}" role="img" aria-label="${HEROES_BY_ID[id]?.name ?? id}" style="background-image:url(${heroStrips[id]})"></span>`;
+/** Hero portrait: the chibi as inline SVG (look 0 = the class's designed look), breathing with CSS. Cached. */
+const heroSvgs: Record<string, string> = {};
+function heroArt(id: string, cls = '', look = 0) {
+  const k = `${id}:${look}`;
+  heroSvgs[k] ??= renderChibi(rollLook(id, look));
+  return `<span class="hero-art ${cls}" role="img" aria-label="${HEROES_BY_ID[id]?.name ?? id}">${heroSvgs[k]}</span>`;
 }
 
 function streakText(s: number) {
@@ -358,7 +347,7 @@ function slotCard(r: R.RunState) {
 
 function renderShop() {
   const r = run!;
-  scene.idle(r.hero);
+  scene.idle(r.hero, R.lookOf(r));
   const hero = HEROES_BY_ID[r.hero];
   const slots = R.slotsOf(r);
   const shop = r.shop
@@ -593,7 +582,7 @@ function renderResult() {
 }
 
 function renderLastChance() {
-  scene.idle(run!.hero);
+  scene.idle(run!.hero, R.lookOf(run!));
   return `
   <h2 class="lose">เลือดหมด… แต่ยังไม่จบ</h2>
   <p>คุณเข้าสู่สถานะ <b>กึ่งวิญญาณ</b>: กลับมาด้วยเลือด 1 แพ้อีกครั้งคือจบรอบ เลือกพลังหนึ่งอย่าง</p>
@@ -618,7 +607,7 @@ function renderMark() {
 
 function renderOver() {
   const r = run!;
-  scene.idle(r.hero);
+  scene.idle(r.hero, R.lookOf(r));
   const won = r.phase === 'won';
   return `
   <h2 class="${won ? 'win' : 'lose'}">${won ? `ชนะครบ ${R.WIN_TARGET}!` : r.conceded ? 'จบรอบ (ยอมแพ้)' : 'จบรอบ'}</h2>
