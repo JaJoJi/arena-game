@@ -9,8 +9,7 @@ import { SIM_VERSION, simulate } from '../sim/combat';
 import { BONUS_KINDS, MAX_BONUS, MAX_H, MAX_W, isShape, occupancy, validTarget } from '../sim/grid';
 import { randomAiBuild } from '../sim/bot';
 import { HEROES_BY_ID } from '../sim/heroes';
-import { SKILLS } from '../sim/skills';
-import { MAX_LV } from '../sim/run';
+import { SKILLS, isVariant } from '../sim/skills';
 import type { Build, Mark } from '../sim/types';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -87,14 +86,14 @@ function validateBuild(x: unknown): Build | string {
   for (const s of b.skills) {
     if (!SKILLS[s?.id]) return 'unknown skill';
     if (SKILLS[s.id].hero && SKILLS[s.id].hero !== b.hero) return 'skill not allowed for hero';
-    if (!Number.isInteger(s.lv) || s.lv < 1 || s.lv > MAX_LV) return 'bad level';
+    if (!isVariant(s.v)) return 'bad level';
     if (s.mark !== undefined && !MARKS.includes(s.mark)) return 'bad mark';
     if (!isShape(s.shape) || !SKILLS[s.id].shapes.includes(s.shape)) return 'bad shape';
     if (![0, 1, 2, 3].includes(s.rot) || !Number.isInteger(s.x) || !Number.isInteger(s.y) || s.x < 0 || s.y < 0) return 'bad position';
     if (!Array.isArray(s.bonus) || s.bonus.length > MAX_BONUS) return 'bad bonus';
     for (const x of s.bonus) if (!BONUS_KINDS.includes(x?.e) || !validTarget(String(x?.t), b.hero)) return 'bad bonus';
     skills.push({
-      id: s.id, lv: s.lv, ...(s.mark ? { mark: s.mark } : {}), shape: s.shape, rot: s.rot, x: s.x, y: s.y,
+      id: s.id, v: s.v, ...(s.mark ? { mark: s.mark } : {}), shape: s.shape, rot: s.rot, x: s.x, y: s.y,
       bonus: s.bonus.map((x) => ({ t: String(x.t), e: x.e })),
     });
   }

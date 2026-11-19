@@ -1,5 +1,5 @@
 import { Rng } from './rng';
-import { SKILLS, SKILL_LIST } from './skills';
+import { SKILLS, SKILL_LIST, hits } from './skills';
 import { ARCHES, type Bonus, type BonusKind, type Rot, type SkillInstance } from './types';
 
 /**
@@ -16,8 +16,10 @@ export const MAX_BONUS = 3;
 export const BONUS_KINDS: BonusKind[] = ['dmg', 'shield', 'haste', 'power', 'trigger'];
 export const POWER_BONUS = 0.25;
 export const HASTE_BONUS = 0.2;
-/** +damage per hit / +shield per fire, by level */
-export const bonusValue = (e: BonusKind, lv: number) => (e === 'dmg' ? 1 + lv : e === 'shield' ? 2 + lv : 0);
+/** +damage per hit / +shield per fire, by level (Lv1–Lv3) */
+export const bonusValue = (e: BonusKind, lv: number) => (e === 'dmg' ? lv : e === 'shield' ? 1 + lv : 0);
+/** True if some variant of the skill hits (a +damage bonus would do nothing otherwise). */
+export const canHit = (id: string) => Object.values(SKILLS[id].tree).some(hits);
 
 /** '#' = cell. Cell index = reading order of '#' in the rows (stable under rotation). */
 export const SHAPES: Record<string, string[]> = {
@@ -137,9 +139,13 @@ export function activeBonuses(skills: SkillInstance[], w: number, h: number): Ac
   return out;
 }
 
-/** Shop offer: a skill with its rolled shape and connect bonuses. */
+/**
+ * Shop offer. v = '' is a new Lv1 skill with its rolled shape and connect bonuses; any other v is an upgrade of a
+ * skill you own (its next tree variant, one of two, picked at random; shape = the owned block's, bonus unused).
+ */
 export interface Offer {
   id: string;
+  v: string;
   shape: string;
   bonus: Bonus[];
 }
@@ -152,11 +158,10 @@ export const validTarget = (t: string, hero: string) =>
   ARCHES.some((a) => t === 'arch:' + a) || SKILL_LIST.some((d) => d.id === t && (!d.hero || d.hero === hero));
 
 export function rollBonus(rng: Rng, id: string, hero: string, existing: Bonus[]): Bonus | null {
-  const def = SKILLS[id];
   for (let tries = 0; tries < 10; tries++) {
     const r = rng.next();
     const e: BonusKind = r < 0.3 ? 'dmg' : r < 0.45 ? 'shield' : r < 0.6 ? 'haste' : r < 0.75 ? 'power' : 'trigger';
-    if (e === 'dmg' && !def.hits) continue; // skills that don't hit roll another effect
+    if (e === 'dmg' && !canHit(id)) continue; // skills that don't hit roll another effect
     const t = rng.next() < 0.6 ? rng.pick(targetsFor(id, hero)) : 'arch:' + rng.pick(ARCHES);
     if (!existing.some((b) => b.t === t && b.e === e)) return { t, e };
   }
@@ -173,7 +178,7 @@ export function rollOffer(rng: Rng, id: string, hero: string): Offer {
     const b = rollBonus(rng, id, hero, bonus);
     if (b) bonus.push(b);
   }
-  return { id, shape, bonus };
+  return { id, v: '', shape, bonus };
 }
 
 /** First free spot (reading order, any rotation). */

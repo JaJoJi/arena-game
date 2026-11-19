@@ -1,7 +1,7 @@
 import { HEROES, HEROES_BY_ID } from './heroes';
 import { Rng, hashSeed } from './rng';
 import { DX, DY, activeBonuses, cellsOf, footprint, matches, shapeSize } from './grid';
-import { BAG_MAX, MAX_LV, buy, gridOf, newRun, priceOf, reroll, toBuild, PRICE, REROLL, type RunState } from './run';
+import { BAG_MAX, PRICES, buy, gridOf, incomeFor, newRun, priceOf, reroll, toBuild, upgradeOf, REROLL, type RunState } from './run';
 import { SKILLS } from './skills';
 import { ARCHES, type Archetype, type Build, type Rot } from './types';
 
@@ -30,12 +30,12 @@ export function botShopTurn(s: RunState, rules: BotRules) {
       if (!offer) return;
       const id = offer.id;
       const d = SKILLS[id];
-      if (priceOf(id) > s.gold) return;
-      const owned = s.skills.find((k) => k.id === id);
+      if (priceOf(offer) > s.gold) return;
       let score: number;
-      if (owned) score = owned.lv < MAX_LV ? 3 : -1;
+      if (offer.v !== '') score = upgradeOf(s, offer) ? 3 : -1; // an upgrade of something we own
+      else if (s.skills.some((k) => k.id === id)) score = -1;
       else if (used + shapeSize(offer.shape) > w * h) score = -1;
-      else score = s.skills.length < 2 ? 2 : 1;
+      else score = 2; // free grid space is worth filling with anything (trees cap at Lv3)
       if (score < 0) return;
       const pi = rules.prefer.indexOf(d.arch as Archetype);
       if (pi >= 0) score += 3 - pi;
@@ -50,7 +50,7 @@ export function botShopTurn(s: RunState, rules: BotRules) {
       buy(s, best);
       continue;
     }
-    if (rerolls < rules.maxRerolls && s.gold >= REROLL + PRICE + rules.reserve) {
+    if (rerolls < rules.maxRerolls && s.gold >= REROLL + PRICES[0] + rules.reserve) {
       reroll(s);
       rerolls++;
       continue;
@@ -196,8 +196,7 @@ export function aiBuild(hero: string, day: number, prefer: Archetype[], seed: nu
   for (let d = 1; d <= day; d++) {
     if (d > 1) {
       s.day = d;
-      const inc = 5 + Math.min(Math.floor(d / 2), 3);
-      s.gold += inc;
+      s.gold += incomeFor(d, 0).base;
       s.rolls = 0;
       reroll(s); // costs 1, but gives a fresh shop for the day
       s.gold += 1;

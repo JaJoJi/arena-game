@@ -22,7 +22,8 @@ export interface Bonus {
 /** One skill block. x < 0 means it is in the bag (owned, not placed, does not fight). */
 export interface SkillInstance {
   id: string;
-  lv: number;
+  /** tree variant: '' = Lv1, 'a' / 'b' = Lv2, 'a1' 'a2' 'b1' 'b2' = Lv3 (see skills.ts) */
+  v: string;
   mark?: Mark;
   shape: string;
   rot: Rot;

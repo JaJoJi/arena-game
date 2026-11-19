@@ -345,3 +345,66 @@ header { display: flex; align-items: center; gap: 8px; }
   100% { transform: rotate(0) scale(1); filter: none; }
 }
 @media (prefers-reduced-motion: reduce) { .blk.rot-anim { animation: none; } }
+
+/* ---------- keyword chips (icon + number; hover / tap explains the keyword) ---------- */
+.chips-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.kw {
+  display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 13px; line-height: 1.4;
+  background: #0b0e13; border: 1px solid var(--line); cursor: help; white-space: nowrap;
+}
+.kw:hover { border-color: var(--accent); }
+.kw-hit, .kw-pierce, .kw-exec, .kw-shatter { color: #ff9a8a; }
+.kw-shield, .kw-steadfast { color: #8cc8ff; }
+.kw-heal, .kw-leech, .kw-cleanse { color: #8ff0a4; }
+.kw-burn { color: #ffb066; }
+.kw-freeze, .kw-slow, .kw-delay { color: #a8e6ff; }
+.kw-grow, .kw-charge, .kw-amplify { color: #ffd166; }
+.kw-thorns, .kw-dispel { color: #d4b0ff; }
+.kw-cd { color: var(--muted); }
+.card.offer.upgrade { border-style: dashed; border-color: var(--accent); }
+.kwlist { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.kwlist li { margin: 2px 0; }
+.kwlist b { color: var(--text, #e6edf3); }
+.tut-tree { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; font-size: 15px; }
+.tut-tree b { background: #0b0e13; border: 1px solid var(--accent); border-radius: 8px; padding: 4px 8px; color: var(--accent); }
+.tut-tree i { color: var(--muted); font-style: normal; }
+.offer-name { font-weight: 600; text-align: center; }
+.offer-desc { color: var(--muted); font-size: 12px; text-align: center; flex: 1; }
+.offer-desc .chips-row { justify-content: center; }
+button.info { min-width: 28px; padding: 2px 6px; font-weight: 700; }
+.card.offer .offer-name button.info { width: auto; margin: 0 0 0 2px; vertical-align: middle; padding: 0 6px; }
+
+/* ---------- skill tree window ---------- */
+.modal { position: fixed; inset: 0; z-index: 50; background: rgba(5, 7, 10, 0.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-box {
+  background: var(--panel); border: 1px solid var(--line); border-top: 4px solid var(--none); border-radius: 10px;
+  width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.modal-box.arch-tank { border-top-color: var(--tank); } .modal-box.arch-burst { border-top-color: var(--burst); }
+.modal-box.arch-scaling { border-top-color: var(--scaling); } .modal-box.arch-control { border-top-color: var(--control); }
+.modal-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 16px; }
+.modal-h button { margin-left: auto; }
+.modal-box p { margin: 0; }
+.tree { display: flex; flex-direction: column; gap: 10px; }
+.troot { display: flex; justify-content: center; }
+.troot .tnode { min-width: 220px; }
+.tbranches { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tbranch { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tb-h { color: var(--accent); font-size: 13px; font-weight: 600; }
+.tb-row { display: flex; flex-direction: column; gap: 6px; }
+.tarrow { align-self: center; color: var(--muted); transform: rotate(90deg); line-height: 1; }
+.tleaves { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tnode { background: #0b0e13; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+.tn-h { font-size: 14px; margin-bottom: 2px; }
+.tn-tag { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--line); color: var(--text); white-space: nowrap; }
+.tnode.cur { border-color: var(--win); box-shadow: 0 0 0 1px var(--win) inset; }
+.tnode.cur .tn-tag { background: var(--win); color: #0b0e13; }
+.tnode.next { border-color: var(--accent); border-style: dashed; }
+.tnode.next .tn-tag { background: var(--accent); color: #0b0e13; }
+.tnode.offer { border-color: #ffe066; border-style: solid; box-shadow: 0 0 8px rgba(255, 224, 102, 0.35); }
+.tnode.offer .tn-tag { background: #ffe066; color: #0b0e13; }
+.tnode.past { opacity: 0.75; }
+.tnode.gone { opacity: 0.4; }
+@media (max-width: 560px) {
+  .tbranches { grid-template-columns: 1fr; }
+}

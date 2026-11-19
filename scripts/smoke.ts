@@ -11,7 +11,7 @@ const post = async (body: unknown) => {
 };
 
 const blk = (id: string, shape: string, x: number, y: number) =>
-  ({ id, lv: 1, shape, rot: 0, x, y, bonus: [{ t: 'arch:burst', e: 'trigger' }] }) as Build['skills'][number];
+  ({ id, v: '', shape, rot: 0, x, y, bonus: [{ t: 'arch:burst', e: 'trigger' }] }) as Build['skills'][number];
 const buildA: Build = { hero: 'knight', w: 5, h: 3, skills: [blk('shield', 'o4', 0, 0), blk('strike', 'i3', 2, 0)] };
 const buildB: Build = { hero: 'witch', w: 5, h: 3, skills: [blk('frost', 'i2', 0, 0), blk('shatter', 'i3', 2, 0)] };
 const tag = Date.now().toString(36);

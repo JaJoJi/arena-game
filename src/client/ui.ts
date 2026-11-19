@@ -5,7 +5,7 @@ import { HEROES, HEROES_BY_ID } from '../sim/heroes';
 import { explain } from '../sim/explain';
 import { hashSeed } from '../sim/rng';
 import * as R from '../sim/run';
-import { ARCH_NAME, SKILLS } from '../sim/skills';
+import { ARCH_NAME, KEYWORDS, SKILLS, chipsOf, lvOf, nextVariants, nodeOf, type Keyword, type Variant } from '../sim/skills';
 import type { BlockStat, Build, CombatEvent, CombatResult, Rot, SkillInstance } from '../sim/types';
 import { HERO_PX, drawHero } from './sprites';
 import { BONUS_ICON, bonusText, dropOrigin, footprintAt, gridHTML, installPatterns, pieceHTML } from './gridView';
@@ -51,7 +51,7 @@ let confirmConcede = false;
 const HL = ['#ff6bd6', '#5ce1ff', '#9dff6b'];
 
 // ---------- storage (per-browser convenience only; may be unavailable) ----------
-const RUN_KEY = 'arena.run.v4';
+const RUN_KEY = 'arena.gridrun.v5';
 const NAME_KEY = 'arena.name';
 function store(key: string, value: string | null) {
   try {
@@ -72,7 +72,7 @@ const saveRun = () => store(RUN_KEY, run ? JSON.stringify(run) : null);
 function loadRun(): R.RunState | null {
   try {
     const r = JSON.parse(fetchStore(RUN_KEY) ?? 'null') as R.RunState | null;
-    return r && r.v === 4 ? r : null;
+    return r && r.v === 5 ? r : null;
   } catch {
     return null;
   }
@@ -82,28 +82,83 @@ const playerName = () => (fetchStore(NAME_KEY) || 'ผู้เล่น').slice
 // ---------- helpers ----------
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-const secs = (k: SkillInstance, haste = 0) => (cdTicks(k.id, k.mark, haste) / 10).toFixed(1);
+
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 const randSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 
-function skillLine(k: SkillInstance) {
-  const d = SKILLS[k.id];
-  const mark = k.mark ? ` <span class="mark">${R.MARK_INFO[k.mark].name}</span>` : '';
-  return `<span class="nm">${d.name} <small>Lv${k.lv}</small>${mark}</span>
-    <span class="desc">${d.desc(k.lv)} · ทุก ${secs(k)} วิ</span>`;
+/** Icon + number chips for a skill variant; each chip explains its keyword on hover / tap. haste = connect-bonus cooldown cut */
+function chipsHTML(k: Pick<SkillInstance, 'id' | 'v' | 'mark'>, haste = 0) {
+  return `<span class="chips-row">${chipsOf(nodeOf(k), cdTicks(k, haste))
+    .map((c) => `<span class="kw kw-${c.kw}" data-kw="${c.kw}">${esc(c.text)}</span>`)
+    .join('')}</span>`;
 }
 
-/** Hover / selected details for a skill: name, effect, cooldown, each connect bonus (on or off). */
-function tipBody(k: Pick<SkillInstance, 'id' | 'lv' | 'mark' | 'bonus'>, fx: ReturnType<typeof bonusState> | null, note = '') {
+/** Keyword tooltip: icon, name and meaning. */
+function kwTip(kw: Keyword) {
+  const x = KEYWORDS[kw];
+  return `<div class="tt-h"><b>${x.icon} ${x.name}</b></div><div class="desc">${x.desc}</div>`;
+}
+
+function skillLine(k: SkillInstance) {
+  const mark = k.mark ? ` <span class="mark">${R.MARK_INFO[k.mark].name}</span>` : '';
+  return `<span class="nm">${nodeOf(k).name} <small>Lv${lvOf(k.v)}</small>${mark}</span>${chipsHTML(k)}`;
+}
+
+// ---------- skill tree window ----------
+/** skill tree window: which skill, the variant you own (null = not owned) and the variant the shop offers */
+let treeOpen: { id: string; cur: string | null; offer: string | null } | null = null;
+function treeNode(id: string, v: Variant, cur: string | null, offer: string | null) {
+  const n = SKILLS[id].tree[v];
+  let cls = '';
+  let tag = '';
+  if (cur !== null) {
+    if (v === cur) [cls, tag] = ['cur', 'ตอนนี้'];
+    else if (cur.startsWith(v)) cls = 'past';
+    else if ((nextVariants(cur) as string[]).includes(v)) [cls, tag] = ['next', 'ขั้นถัดไป'];
+    else if (!v.startsWith(cur)) [cls, tag] = ['gone', 'ไปไม่ได้แล้ว'];
+  }
+  if (v === offer) [cls, tag] = [`${cls} offer`, 'ในร้าน'];
+  return `<div class="tnode ${cls}"><div class="tn-h"><b>${n.name}</b> <small>Lv${lvOf(v)}</small>${tag ? ` <span class="tn-tag">${tag}</span>` : ''}</div>${chipsHTML({ id, v })}</div>`;
+}
+function treeHTML() {
+  if (!treeOpen) return '';
+  const { id, cur, offer } = treeOpen;
+  const d = SKILLS[id];
+  const branch = (b: 'a' | 'b') => `<div class="tbranch">
+      <div class="tb-h">สาย ${b.toUpperCase()}: ${d.tree[b].style ?? ''}</div>
+      <div class="tb-row">${treeNode(id, b, cur, offer)}<span class="tarrow" aria-hidden="true">→</span>
+        <div class="tleaves">${treeNode(id, `${b}1` as Variant, cur, offer)}${treeNode(id, `${b}2` as Variant, cur, offer)}</div></div>
+    </div>`;
+  return `<div class="modal" data-a="treeClose"><div class="modal-box arch-${d.arch}" role="dialog" aria-label="ต้นไม้ skill ${d.name}">
+    <div class="modal-h"><b>ต้นไม้ skill: ${d.name}</b> <span class="muted small">${ARCH_NAME[d.arch]}${d.hero ? ' · เฉพาะฮีโร่' : ''}</span>
+      <button class="small ghost" data-a="treeClose">ปิด ✕</button></div>
+    <p class="muted small">Lv1 → เลือกได้ 1 ใน 2 สายที่ Lv2 → แต่ละสายแยกอีก 2 ทางที่ Lv3 · ร้านจะสุ่มเสนอ 1 ทางของขั้นถัดไปให้ ซื้อแล้วย้อนกลับไม่ได้ · อัปเกรดแล้วบล็อกใช้รูปและที่เดิม และได้โบนัสติดกันเพิ่ม 1 อัน</p>
+    <div class="tree">
+      <div class="troot">${treeNode(id, '', cur, offer)}</div>
+      <div class="tbranches">${branch('a')}${branch('b')}</div>
+    </div>
+  </div></div>`;
+}
+/** ⓘ button that opens the skill tree. cur = variant you own (null = not owned), offer = variant in the shop */
+const treeBtn = (id: string, cur: string | null, offer: string | null) =>
+  `<button class="small ghost info" data-a="tree" data-i="${id}" data-own="${cur !== null ? 1 : 0}" data-cur="${cur ?? ''}" data-offer="${offer ?? ''}" aria-label="ดูต้นไม้ skill" title="ดูต้นไม้ skill ทั้งหมด">ⓘ</button>`;
+
+/** Hover / selected details for a skill: name, chips, keywords, cooldown, each connect bonus (on or off). */
+function tipBody(k: Pick<SkillInstance, 'id' | 'v' | 'mark' | 'bonus'>, fx: ReturnType<typeof bonusState> | null, note = '') {
   const d = SKILLS[k.id];
+  const node = nodeOf(k);
+  const lv = lvOf(k.v);
   const on = fx?.on ?? new Set<number>();
   const bonus = k.bonus
-    .map((b, bi) => `<li class="${on.has(bi) ? 'on' : ''}" style="--hl:${HL[bi % HL.length]}"><span class="bi">${BONUS_ICON[b.e]}</span> ${bonusText(b, k.lv)}${on.has(bi) ? ' <b class="ok">✓ ทำงาน</b>' : ''}</li>`)
+    .map((b, bi) => `<li class="${on.has(bi) ? 'on' : ''}" style="--hl:${HL[bi % HL.length]}"><span class="bi">${BONUS_ICON[b.e]}</span> ${bonusText(b, lv)}${on.has(bi) ? ' <b class="ok">✓ ทำงาน</b>' : ''}</li>`)
     .join('');
-  return `<div class="tt-h arch-${d.arch}"><b>${d.name}</b> <small>Lv${k.lv}</small>${d.hero ? ' <span class="mark">เฉพาะ</span>' : ''}
+  const kws = [...new Set(chipsOf(node).map((c) => c.kw))].filter((kw) => kw !== 'cd');
+  const branch = k.v.length >= 1 ? d.tree[k.v[0] as 'a' | 'b'].style : '';
+  return `<div class="tt-h arch-${d.arch}"><b>${node.name}</b> <small>Lv${lv}</small>${d.hero ? ' <span class="mark">เฉพาะ</span>' : ''}
       ${k.mark ? ` <span class="mark">${R.MARK_INFO[k.mark].name}</span>` : ''}</div>
-    <div class="muted small">${ARCH_NAME[d.arch]} · ทุก ${(cdTicks(k.id, k.mark, fx?.haste ?? 0) / 10).toFixed(1)} วิ${fx?.power ? ` · แรงขึ้น ${Math.round(fx.power * 100)}%` : ''}</div>
-    <div class="desc">${d.desc(k.lv)}</div>
+    <div class="muted small">${ARCH_NAME[d.arch]}${branch ? ` · สาย${branch}` : ''}${k.v ? ` · มาจาก ${d.name}` : ''}${fx?.power ? ` · แรงขึ้น ${Math.round(fx.power * 100)}%` : ''}</div>
+    <div>${chipsHTML(k, fx?.haste ?? 0)}</div>
+    <ul class="kwlist">${kws.map((kw) => `<li><b>${KEYWORDS[kw].icon} ${KEYWORDS[kw].name}</b> ${KEYWORDS[kw].desc}</li>`).join('')}</ul>
     ${bonus ? `<div class="muted small">โบนัสเมื่อวางติดกัน (ด้านไหนก็ได้)</div><ul class="bonus">${bonus}</ul>` : ''}
     ${fx?.triggeredBy.length ? `<div class="combo small">⚡ ถูกสั่งโดย ${fx.triggeredBy.join(', ')}</div>` : ''}
     ${note ? `<div class="muted small">${note}</div>` : ''}`;
@@ -141,9 +196,9 @@ function tipFor(key: string): string {
   if (kind === 's') {
     const o: Offer | null = r.shop[n];
     if (!o) return '';
-    const owned = r.skills.find((k) => k.id === o.id);
-    if (owned) return tipBody({ ...owned, lv: Math.min(R.MAX_LV, owned.lv + 1) }, null, 'มีแล้ว: ซื้อเพื่ออัปเลเวล ใช้รูปเดิม และได้โบนัสใหม่ 1 อัน');
-    return tipBody({ id: o.id, lv: 1, bonus: o.bonus }, null);
+    const owned = R.upgradeOf(r, o);
+    if (owned) return tipBody({ ...owned, v: o.v }, null, `อัปเกรดจาก ${nodeOf(owned).name} Lv${lvOf(owned.v)}: ใช้รูปและที่เดิม และได้โบนัสใหม่ 1 อัน`);
+    return tipBody({ id: o.id, v: o.v, bonus: o.bonus }, null);
   }
   return '';
 }
@@ -191,7 +246,7 @@ function render() {
     replayDone: renderReplayDone,
   }[view]();
   hideTip();
-  $panel.innerHTML = (toast ? `<div class="toast">${esc(toast)}</div>` : '') + html;
+  $panel.innerHTML = (toast ? `<div class="toast">${esc(toast)}</div>` : '') + html + treeHTML();
   toast = '';
   playBlockAnims();
   // selected skill (tap on mobile) shows the same colour highlight as hover
@@ -222,7 +277,7 @@ function renderTown() {
         (h) => `<div class="card arch-${h.arch}">${heroArt(h.id, 'small')}<div class="nm">${h.name}</div><div class="tag">${ARCH_NAME[h.arch]}</div>
           <div class="desc"><b>วิธีเล่น:</b> ${h.style}</div>
           <div class="desc"><b>ความสามารถ:</b> ${h.passive}</div>
-          <div class="desc muted">skill เฉพาะ: <b>${SKILLS[h.unique].name}</b>: ${SKILLS[h.unique].desc(1)}</div></div>`,
+          <div class="desc muted">skill เฉพาะ: <b>${SKILLS[h.unique].name}</b> ${treeBtn(h.unique, null, null)} ${chipsHTML({ id: h.unique, v: '' })}</div></div>`,
       ).join('')}</div>`;
     } else if (b.future) {
       body += `<p class="muted">เร็วๆ นี้: ${b.future}</p>`;
@@ -254,7 +309,7 @@ function renderTitle() {
       <b>${h.name}</b><span class="tag">${ARCH_NAME[h.arch]}</span>
       <span>${h.style}</span>
       <span>${h.passive}</span>
-      <span class="muted">skill เฉพาะ: ${SKILLS[h.unique].name}: ${SKILLS[h.unique].desc(1)}</span>
+      <span class="muted">skill เฉพาะ: ${SKILLS[h.unique].name}</span>${chipsHTML({ id: h.unique, v: '' })}
     </button>`,
   ).join('')}</div>`;
 }
@@ -287,16 +342,19 @@ function renderShop() {
     .map((o, i) => {
       if (!o) return `<div class="card empty">ซื้อแล้ว</div>`;
       const d = SKILLS[o.id];
-      const owned = r.skills.find((k) => k.id === o.id);
-      const lv = owned ? owned.lv + 1 : 1;
-      const price = R.priceOf(o.id);
-      const maxed = !!owned && owned.lv >= R.MAX_LV;
-      const disabled = r.gold < price || maxed;
-      const why = maxed ? 'เต็มแล้ว' : r.gold < price ? 'เงินไม่พอ' : '';
-      const look = owned ? { ...owned, lv: Math.min(lv, R.MAX_LV) } : { ...o, lv: 1 };
-      return `<div class="card offer" data-tip="s:${i}">
+      const node = d.tree[o.v as Variant];
+      const up = R.upgradeOf(r, o);
+      const price = R.priceOf(o);
+      const stale = o.v !== '' && !up;
+      const why = stale ? 'ใช้ไม่ได้แล้ว' : r.gold < price ? 'เงินไม่พอ' : '';
+      const disabled = !!why;
+      const branch = o.v ? d.tree[o.v[0] as 'a' | 'b'].style : '';
+      const look = up ? { ...up, v: o.v } : { ...o };
+      return `<div class="card offer${o.v ? ' upgrade' : ''}" data-tip="s:${i}">
+        <div class="offer-name">${node.name} <small>Lv${lvOf(o.v)}</small> ${treeBtn(o.id, up ? up.v : null, o.v)}</div>
         <div class="offer-art">${pieceHTML(look, { tip: `s:${i}` })}</div>
-        <div class="offer-meta">${owned ? `<span class="up">อัป Lv${Math.min(lv, R.MAX_LV)}</span>` : ''}${o.bonus.length && !owned ? `<span class="bicons">${o.bonus.map((b) => BONUS_ICON[b.e]).join(' ')}</span>` : ''}${d.hero ? '<span class="mark">เฉพาะ</span>' : ''}</div>
+        <div class="offer-meta">${o.v ? `<span class="up">⬆ อัปเกรด ${d.name}${branch ? ` · ${branch}` : ''}</span>` : ''}${o.bonus.length && !o.v ? `<span class="bicons">${o.bonus.map((b) => BONUS_ICON[b.e]).join(' ')}</span>` : ''}${d.hero ? '<span class="mark">เฉพาะ</span>' : ''}</div>
+        <div class="offer-desc">${chipsHTML({ id: o.id, v: o.v })}</div>
         <button data-a="buy" data-i="${i}" ${disabled ? 'disabled' : ''}>${why || `ซื้อ ${price}`}</button>
       </div>`;
     })
@@ -311,9 +369,10 @@ function renderShop() {
     info = `<div class="selinfo arch-${SKILLS[k.id].arch}">
       ${tipBody(k, k.x >= 0 ? bonusState(r, sel) : null, k.x < 0 ? 'อยู่ในกระเป๋า: ไม่ได้ลงสู้' : '')}
       <div class="actions">
+        ${treeBtn(k.id, k.v, null)}
         <button class="small" data-a="rot">หมุน ⟳</button>
         ${k.x >= 0 ? '<button class="small" data-a="bag">เก็บเข้ากระเป๋า</button>' : ''}
-        <button class="small" data-a="sell" data-i="${sel}">ขาย +${k.lv}</button>
+        <button class="small" data-a="sell" data-i="${sel}">ขาย +${R.sellPrice(k)}</button>
         <button class="small ghost" data-a="desel">ยกเลิก</button>
       </div></div>`;
   }
@@ -481,7 +540,7 @@ function statsTable(b: Build, stats: BlockStat[]) {
     .map(({ k, st }) => {
       const pct = total ? Math.round((st.d / total) * 100) : 0;
       return `<tr>
-        <td class="sk">${pieceHTML({ ...k, rot: 0 })}<span>${SKILLS[k.id].name} <small>Lv${k.lv}</small></span></td>
+        <td class="sk">${pieceHTML({ ...k, rot: 0 })}<span>${nodeOf(k).name} <small>Lv${lvOf(k.v)}</small></span></td>
         <td>${st.c}${st.tc ? ` <small class="combo">+${st.tc} ⚡</small>` : ''}</td>
         <td class="dmg"><div class="bar"><i style="width:${pct}%"></i></div><span>${st.d}</span> <small class="muted">${pct}%</small></td>
         ${has('bd') ? `<td>${st.bd ? `+${st.bd}` : '·'}</td>` : ''}
@@ -522,7 +581,7 @@ function renderLastChance() {
   <h2 class="lose">เลือดหมด… แต่ยังไม่จบ</h2>
   <p>คุณเข้าสู่สถานะ <b>กึ่งวิญญาณ</b>: กลับมาด้วยเลือด 1 แพ้อีกครั้งคือจบรอบ เลือกพลังหนึ่งอย่าง</p>
   <div class="heroes">
-    <button class="hero" data-a="lc" data-i="awaken"><b>ตื่นพลัง</b><span>skill ทุกใบที่ต่ำกว่า Lv3 ขึ้นเป็น Lv3</span><span class="muted">เหมาะกับ build ที่ของครบแต่เลเวลต่ำ</span></button>
+    <button class="hero" data-a="lc" data-i="awaken"><b>ตื่นพลัง</b><span>skill Lv1 ทุกใบขึ้นเป็น Lv2 (สุ่มสาย A หรือ B)</span><span class="muted">เหมาะกับ build ที่ของครบแต่เลเวลต่ำ</span></button>
     <button class="hero" data-a="lc" data-i="mark"><b>ตราวิญญาณ</b><span>สุ่มตราหนึ่งในสี่แบบ แล้วเลือกใส่ skill</span><span class="muted">เหมาะกับ build ที่มี skill หลักชัด</span></button>
     <button class="hero" data-a="lc" data-i="supply"><b>เสบียงสุดท้าย</b><span>เงิน 8 และตาราง +1 แถวถาวร</span><span class="muted">เหมาะกับ build ที่ยังขาดชิ้นสำคัญ</span></button>
   </div>`;
@@ -709,6 +768,8 @@ function onClick(ev: Event) {
   const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-a]');
   if (!el || (el as HTMLButtonElement).disabled) return;
   const a = el.dataset.a!;
+  // the tree window closes from its button or a click on the dark backdrop, not from clicks inside it
+  if (a === 'treeClose' && el.classList.contains('modal') && ev.target !== el) return;
   const arg = el.dataset.i ?? '';
   const n = Number(arg);
   let err: string | null = null;
@@ -744,6 +805,15 @@ function onClick(ev: Event) {
     case 'buy':
       err = R.buy(run!, n);
       break;
+    case 'tree':
+      if (!SKILLS[arg]) return;
+      treeOpen = { id: arg, cur: el.dataset.own === '1' ? (el.dataset.cur ?? '') : null, offer: el.dataset.offer || null };
+      render();
+      return;
+    case 'treeClose':
+      treeOpen = null;
+      render();
+      return;
     case 'reroll':
       err = R.reroll(run!);
       break;
@@ -894,6 +964,8 @@ function highlightFor(key: string) {
 }
 function onHover(ev: PointerEvent) {
   if (ev.pointerType !== 'mouse' || drag?.moved) return;
+  const kw = (ev.target as Element).closest?.('[data-kw]') as HTMLElement | null;
+  if (kw) return showTip('raw:' + kwTip(kw.dataset.kw as Keyword), ev.clientX, ev.clientY);
   const tt = (ev.target as Element).closest?.('[data-ttxt]') as HTMLElement | null;
   if (tt) return showTip('raw:' + tt.dataset.ttxt, ev.clientX, ev.clientY);
   const el = (ev.target as Element).closest?.('[data-tip]') as HTMLElement | SVGElement | null;
@@ -1025,7 +1097,9 @@ function clearPreview() {
 
 function onPointerDown(ev: PointerEvent) {
   if (ev.pointerType !== 'mouse') {
-    // tap a chart block to see its details
+    // tap a keyword chip or a chart block to see its details
+    const kw = (ev.target as Element).closest?.('[data-kw]') as HTMLElement | null;
+    if (kw) return showTip('raw:' + kwTip(kw.dataset.kw as Keyword), ev.clientX, ev.clientY);
     const tt = (ev.target as Element).closest?.('[data-ttxt]') as HTMLElement | null;
     if (tt) return showTip('raw:' + tt.dataset.ttxt, ev.clientX, ev.clientY);
     if (!(ev.target as Element).closest?.('[data-tip]')) hideTip();
@@ -1130,6 +1204,12 @@ export function startUI(st: Stage) {
     if (view === 'town') render();
   };
   $panel.addEventListener('click', onClick);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && treeOpen) {
+      treeOpen = null;
+      render();
+    }
+  });
   $panel.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);

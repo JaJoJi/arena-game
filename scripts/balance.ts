@@ -121,7 +121,7 @@ for (const DAY of DAYS) {
   if (spread > SPREAD) problems.push(`day ${DAY}: hero spread ${(spread * 100).toFixed(0)} points`);
 
   console.log('\nExample builds:');
-  for (const h of HEROES) console.log(' ', h.id.padEnd(10), builds[h.id][0].skills.map((s) => `${s.id}${s.lv}`).join(' ') + `  (${builds[h.id][0].w}x${builds[h.id][0].h})`);
+  for (const h of HEROES) console.log(' ', h.id.padEnd(10), builds[h.id][0].skills.map((s) => `${s.id}${s.v ? '.' + s.v : ''}`).join(' ') + `  (${builds[h.id][0].w}x${builds[h.id][0].h})`);
 }
 
 console.log(problems.length ? `\n✘ ${problems.length} targets missed:\n  ` + problems.join('\n  ') : '\n✔ All targets met');

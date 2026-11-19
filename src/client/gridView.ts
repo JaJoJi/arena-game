@@ -1,5 +1,5 @@
 import { activeBonuses, bonusValue, cellsOf, footprint, type ActiveBonus } from '../sim/grid';
-import { ARCH_NAME, SKILLS } from '../sim/skills';
+import { ARCH_NAME, SKILLS, lvOf } from '../sim/skills';
 import type { Archetype, Bonus, Rot, SkillInstance } from '../sim/types';
 
 /**
@@ -63,7 +63,7 @@ export function installPatterns() {
   document.body.prepend(svg);
 }
 
-type Piece = Pick<SkillInstance, 'id' | 'lv' | 'shape' | 'mark'> & { rot?: Rot };
+type Piece = Pick<SkillInstance, 'id' | 'v' | 'shape' | 'mark'> & { rot?: Rot };
 
 interface BlockOpts {
   /** data-blk index (interactive) */
@@ -99,7 +99,8 @@ function blockSVG(k: Piece, o: BlockOpts) {
   });
   const [px, py] = cells[0];
   let pips = '';
-  for (let l = 0; l < k.lv; l++) pips += `<circle cx="${px * U + 4 + l * 3.4}" cy="${py * U + 4}" r="1.35" fill="${k.lv >= 5 ? '#ffe066' : '#fff'}" stroke="#000" stroke-width=".5"/>`;
+  const lv = lvOf(k.v);
+  for (let l = 0; l < lv; l++) pips += `<circle cx="${px * U + 4 + l * 3.4}" cy="${py * U + 4}" r="1.35" fill="${lv >= 3 ? '#ffe066' : '#fff'}" stroke="#000" stroke-width=".5"/>`;
   if (k.mark) pips += `<path d="M${px * U + 4} ${py * U + 7} l2.5 2.5 l-2.5 2.5 l-2.5 -2.5 Z" fill="#c9a0ff" stroke="#000" stroke-width=".6"/>`;
   const [ox, oy] = o.at ?? [0, 0];
   const cls = `blk arch-${arch}${o.selected ? ' sel' : ''}${o.buffed ? ' buffed' : ''}`;
