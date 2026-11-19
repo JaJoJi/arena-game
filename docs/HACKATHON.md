@@ -2,6 +2,8 @@
 
 Notes from research on 18 Nov 2026. Sources at the bottom.
 
+**Project name: Mochi Moon** (decided 19 Nov 2026). Art style: the mochi chibi critters from the layered template (mix-and-match parts, recolour by palette).
+
 ## Goal
 
 Enter **Colosseum Eternal**, Colosseum's perpetual hackathon (https://colosseum.com/eternal), with this game.
@@ -88,6 +90,43 @@ waitlist and playtesters; write the founder story; practise the English pitch; t
 
 **Tool to try:** Colosseum Copilot (agent tool with project data from every Colosseum hackathon):
 https://docs.colosseum.com/copilot
+
+## Onchain plan (decided 19 Nov 2026)
+
+**Order:** finish balance and game features first. Then move the game **100% onchain with MagicBlock**:
+run state and fights in an Ephemeral Rollup, session keys (no wallet popup per action), MagicBlock VRF for shop
+rolls, fight seeds and matchmaking, results and builds committed to Solana.
+
+**Technical approach:**
+- Write the sim **once in Rust**: compile it to a Solana program for the chain and to WebAssembly for the browser
+  replay, so the two can never disagree. Integer / fixed-point maths only (also removes the `Math.pow` risk).
+- **Spike first (1 week):** combat core + 4 skills in Rust, one full fight inside an Ephemeral Rollup. Measure compute
+  units and speed, and check WASM matches the TS sim tick for tick. Fall back to "fights offchain, hashes onchain +
+  verify button" if it does not fit.
+- List version is far simpler onchain than the grid (short array vs shape/placement checks). Keep launch content small.
+- Graphics, town UI and analytics stay in the client; the client only shows what the chain says.
+
+## Onchain feature ideas (beyond running the game onchain)
+
+Judges want crypto to be essential, not a storage layer. Ideas, each checked against the 10 principles:
+
+| # | Idea | What it is | Why it is onchain-native | Risk / principle |
+|---|---|---|---|---|
+| 1 | **Challenge Blinks** ⭐ | Share a build or replay as a Solana Blink on X / Telegram: "beat my build" plays the fight right in the post | Solana-only growth loop; every share is a playable ad | Low |
+| 2 | **Agent Arena** ⭐ | Bot strategies are onchain assets (Metaplex Core) with a win/loss record written only by the program; anyone, including outside AI agents, can submit a strategy through an open program interface and it fights 24/7 | Provable records, open to agents (2026 trend), composable | Strategies are not run loot, so principle 5 holds; label AI opponents |
+| 3 | **Legend builds** ⭐ | An 8-win build is minted as a soulbound trophy and joins a permanent onchain boss pool for later seasons; its owner is credited every time it beats someone | Your build lives forever onchain and keeps earning reputation | Low |
+| 4 | **Transparent season pool** | Pass sales / sponsors fund a prize account; payout rules and winners are public onchain; no player stakes | Anyone can audit the prizes | ⚠ Thai legal review first; principle 4 (the game never pays out from player money) |
+| 5 | **Ruler's decree by VRF** | The daily rule is drawn onchain by VRF (or voted by season-pass holders) and nobody, including the team, can pick it in advance | Fair, visible randomness | Low |
+| 6 | **Strategy licensing** | Owners can let others use their bot strategy; a fee share goes to the creator through a marketplace with fees | Creator economy for strategies | Ties to the marketplace decision (Phase 7) |
+| 7 | **Proof-of-play profile** | Soulbound achievements and season ranks: a portable reputation other apps can read | Composable identity | Low |
+| 8 | **Onchain referrals** | Joining through someone's bot or Blink link is recorded; the referrer earns cosmetics | Fair, visible attribution | Low |
+| 9 | **Cosmetic skins as assets** | Skins (the layered chibi recolours) as tradable items with creator royalties; never combat power | Ownership and trading | Principle 1 (no combat numbers for money) |
+| 10 | **Seeker perks** | Seeker Genesis Token holders get a season cosmetic or early access | Solana Mobile channel | Low |
+
+Spectator prediction markets (betting on bot-vs-bot fights) are left out: high gambling risk in Thailand.
+
+**Suggested hackathon core:** 1 + 2 + 3 (Blinks for growth, Agent Arena as the story, Legend builds for retention),
+with 4 only after legal advice.
 
 ## Sources
 
