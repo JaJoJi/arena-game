@@ -1,4 +1,5 @@
 import { Rng } from './rng';
+import { L } from '../i18n';
 import { SKILLS, SKILL_LIST, hits } from './skills';
 import { ARCHES, type Bonus, type BonusKind, type Rot, type SkillInstance } from './types';
 
@@ -70,8 +71,8 @@ export function occupancy(skills: SkillInstance[], w: number, h: number): Occupa
     const k = skills[i];
     if (k.x < 0) continue;
     for (const [x, y] of footprint(k)) {
-      if (x < 0 || y < 0 || x >= w || y >= h) return 'ออกนอกตาราง';
-      if (g[y * w + x] !== -1) return 'วางทับกัน';
+      if (x < 0 || y < 0 || x >= w || y >= h) return L('ออกนอกตาราง', 'Outside the grid');
+      if (g[y * w + x] !== -1) return L('วางทับกัน', 'Overlaps another block');
       g[y * w + x] = i;
     }
   }

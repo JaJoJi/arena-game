@@ -3,22 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Arena POC</title>
+    <title>Mochi Moon</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;600&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <header><b>Arena</b> <small>POC · ชื่อชั่วคราว</small></header>
+    <header><b class="logo"><span class="logo-moon" aria-hidden="true">🌕</span> Mochi Moon</b></header>
     <div id="stage"></div>
-    <main id="panel"><p class="muted">กำลังโหลด…</p></main>
+    <main id="panel"><p class="muted">กำลังโหลด… · Loading…</p></main>
     <script type="module" src="./main.ts"></script>
     <script>
       // If the game code fails to load (bad module, network), say so instead of "loading" forever.
       setTimeout(function () {
         var p = document.getElementById('panel');
-        if (p && p.textContent.indexOf('กำลังโหลด') !== -1 && !document.querySelector('canvas')) {
-          p.innerHTML = '<p style="color:#ff6b6b">โหลดเกมไม่สำเร็จ ลองรีเฟรช หรือเปิด DevTools (F12) ดู Console</p>';
+        if (p && p.textContent.indexOf('Loading') !== -1 && !document.querySelector('canvas')) {
+          p.innerHTML = '<p style="color:#ff6b6b">โหลดเกมไม่สำเร็จ ลองรีเฟรช · The game failed to load, try refreshing (F12 → Console for details)</p>';
         }
       }, 10000);
     </script>

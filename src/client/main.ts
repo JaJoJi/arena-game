@@ -4,7 +4,10 @@ import { TownScene, townReady } from './townScene';
 import { initTutorial } from './tutorial';
 import { startUI, type Stage } from './ui';
 import { ZOOM } from './view';
+import { initLang, mountLangSwitch, onLang } from './lang';
 import './style.css';
+
+initLang();
 
 async function boot() {
   // Make sure the Thai font is ready before Phaser draws canvas text.
@@ -35,6 +38,8 @@ async function boot() {
   };
   startUI(stage);
   initTutorial();
+  mountLangSwitch();
+  onLang(() => town.refreshLabels());
 }
 
 // Text is rasterised at ZOOM x so it stays sharp on the zoomed cameras.

@@ -1,4 +1,5 @@
 import { Rng, hashSeed } from './rng';
+import { L } from '../i18n';
 import { MAX_BONUS, MAX_H, MAX_W, findSpot, fits, rollBonus, rollOffer, type Offer } from './grid';
 import { HEROES, HEROES_BY_ID } from './heroes';
 import { SKILLS, SKILL_LIST, lvOf, nextVariants } from './skills';
@@ -108,15 +109,15 @@ export function nextExpand(s: RunState): 'col' | 'row' | null {
 /** Buy +1 column or row of grid space. */
 export function buyExpand(s: RunState): string | null {
   const what = nextExpand(s);
-  if (!what) return 'ตารางใหญ่สุดแล้ว';
+  if (!what) return L('ตารางใหญ่สุดแล้ว', 'The grid is already at max size');
   const price = expandPrice(s);
-  if (s.gold < price) return 'เงินไม่พอ';
+  if (s.gold < price) return L('เงินไม่พอ', 'Not enough gold');
   // grow by one step from the CURRENT size (bonus may have been capped by the day's base size)
   const before = gridOf(s);
   if (what === 'col') s.bonusCols = (s.bonusCols ?? 0) + 1;
   else s.bonusRows += 1;
   const after = gridOf(s);
-  if (after.w === before.w && after.h === before.h) return 'ตารางใหญ่สุดแล้ว';
+  if (after.w === before.w && after.h === before.h) return L('ตารางใหญ่สุดแล้ว', 'The grid is already at max size');
   s.gold -= price;
   s.expands = (s.expands ?? 0) + 1;
   return null;
@@ -188,8 +189,8 @@ function rollShop(s: RunState) {
 }
 
 export function reroll(s: RunState): string | null {
-  if (s.day <= 1) return 'วันแรกเป็นร้านประจำฮีโร่ สุ่มใหม่ได้ตั้งแต่วันที่ 2';
-  if (s.gold < REROLL) return 'เงินไม่พอ';
+  if (s.day <= 1) return L('วันแรกเป็นร้านประจำฮีโร่ สุ่มใหม่ได้ตั้งแต่วันที่ 2', 'Day 1 is your hero’s fixed shop; you can reroll from day 2');
+  if (s.gold < REROLL) return L('เงินไม่พอ', 'Not enough gold');
   s.gold -= REROLL;
   s.rolls++;
   rollShop(s);
@@ -202,19 +203,19 @@ export function reroll(s: RunState): string | null {
  */
 export function buy(s: RunState, i: number): string | null {
   const offer = s.shop[i];
-  if (!offer) return 'ไม่มีของ';
+  if (!offer) return L('ไม่มีของ', 'Nothing there');
   const price = priceOf(offer);
-  if (s.gold < price) return 'เงินไม่พอ';
+  if (s.gold < price) return L('เงินไม่พอ', 'Not enough gold');
   if (offer.v !== '') {
     const owned = upgradeOf(s, offer);
-    if (!owned) return 'อัปเกรดนี้ใช้กับ skill ที่มีอยู่ไม่ได้แล้ว';
+    if (!owned) return L('อัปเกรดนี้ใช้กับ skill ที่มีอยู่ไม่ได้แล้ว', 'This upgrade no longer fits a skill you own');
     owned.v = offer.v;
     if (owned.bonus.length < MAX_BONUS) {
       const b = rollBonus(new Rng(hashSeed(s.seed, s.day, s.rolls, 'lvl', i)), owned.id, s.hero, owned.bonus);
       if (b) owned.bonus.push(b);
     }
   } else {
-    if (s.skills.some((k) => k.id === offer.id)) return 'มี skill นี้แล้ว';
+    if (s.skills.some((k) => k.id === offer.id)) return L('มี skill นี้แล้ว', 'You already have this skill');
     const { w, h } = gridOf(s);
     s.skills.push({ id: offer.id, v: '', shape: offer.shape, rot: 0, x: -1, y: -1, bonus: offer.bonus.map((b) => ({ ...b })) });
     const idx = s.skills.length - 1;
@@ -222,7 +223,7 @@ export function buy(s: RunState, i: number): string | null {
     if (spot) Object.assign(s.skills[idx], spot);
     else if (bag(s).length > BAG_MAX) {
       s.skills.pop();
-      return 'ไม่มีที่ว่าง ขายหรือจัดตารางก่อน';
+      return L('ไม่มีที่ว่าง ขายหรือจัดตารางก่อน', 'No room: sell something or rearrange first');
     }
   }
   s.gold -= price;
@@ -240,9 +241,9 @@ export function sell(s: RunState, i: number) {
 /** Put block i at (x, y) with rotation rot. Returns an error if it does not fit. */
 export function place(s: RunState, i: number, x: number, y: number, rot: Rot): string | null {
   const k = s.skills[i];
-  if (!k) return 'ไม่มีของ';
+  if (!k) return L('ไม่มีของ', 'Nothing there');
   const { w, h } = gridOf(s);
-  if (!fits(s.skills, w, h, i, x, y, rot)) return 'วางตรงนี้ไม่ได้';
+  if (!fits(s.skills, w, h, i, x, y, rot)) return L('วางตรงนี้ไม่ได้', 'Cannot place it here');
   Object.assign(k, { x, y, rot });
   return null;
 }
@@ -250,8 +251,8 @@ export function place(s: RunState, i: number, x: number, y: number, rot: Rot): s
 /** Take block i off the grid into the bag. */
 export function unplace(s: RunState, i: number): string | null {
   const k = s.skills[i];
-  if (!k) return 'ไม่มีของ';
-  if (k.x >= 0 && bag(s).length >= BAG_MAX) return 'กระเป๋าเต็ม';
+  if (!k) return L('ไม่มีของ', 'Nothing there');
+  if (k.x >= 0 && bag(s).length >= BAG_MAX) return L('กระเป๋าเต็ม', 'The bag is full');
   Object.assign(k, { x: -1, y: -1 });
   return null;
 }

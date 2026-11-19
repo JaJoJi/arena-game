@@ -223,6 +223,11 @@ export class TownScene extends Phaser.Scene {
     }
   }
 
+  /** Re-read building names (after a language change). */
+  refreshLabels() {
+    for (const b of BUILDINGS) this.labels.get(b.id)?.setText(b.name);
+  }
+
   /** Highlight a building without moving the camera. */
   setSelected(id: string | null) {
     this.selected = id;

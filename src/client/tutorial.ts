@@ -3,6 +3,8 @@
  * Slide content lives in tutorialSlides.ts (each game version has its own).
  */
 import { SLIDES, TUTORIAL_KEY, type Slide } from './tutorialSlides';
+import { L } from '../i18n';
+import { onLang } from './lang';
 
 let open = false;
 
@@ -37,14 +39,14 @@ export function showTutorial() {
   let i = 0;
   const wrap = document.createElement('div');
   wrap.className = 'tut-backdrop';
-  wrap.innerHTML = `<div class="tut" role="dialog" aria-modal="true" aria-label="วิธีเล่น">
-    <button class="tut-x ghost small" data-t="close" aria-label="ปิด">✕</button>
+  wrap.innerHTML = `<div class="tut" role="dialog" aria-modal="true" aria-label="${L('วิธีเล่น', 'How to play')}">
+    <button class="tut-x ghost small" data-t="close" aria-label="${L('ปิด', 'Close')}">✕</button>
     <div class="tut-slide"></div>
     <div class="tut-dots"></div>
     <div class="tut-nav">
-      <button class="ghost" data-t="prev">← ก่อนหน้า</button>
-      <button class="ghost small" data-t="close">ข้าม</button>
-      <button class="primary" data-t="next">ถัดไป →</button>
+      <button class="ghost" data-t="prev">← ${L('ก่อนหน้า', 'Back')}</button>
+      <button class="ghost small" data-t="close">${L('ข้าม', 'Skip')}</button>
+      <button class="primary" data-t="next">${L('ถัดไป', 'Next')} →</button>
     </div>
   </div>`;
   document.body.appendChild(wrap);
@@ -55,9 +57,9 @@ export function showTutorial() {
 
   const draw = () => {
     $slide.innerHTML = slideHTML(SLIDES[i]);
-    $dots.innerHTML = SLIDES.map((_, k) => `<button class="tut-dot ${k === i ? 'on' : ''}" data-t="go" data-k="${k}" aria-label="หน้า ${k + 1}"></button>`).join('');
+    $dots.innerHTML = SLIDES.map((_, k) => `<button class="tut-dot ${k === i ? 'on' : ''}" data-t="go" data-k="${k}" aria-label="${L('หน้า', 'Page')} ${k + 1}"></button>`).join('');
     $prev.disabled = i === 0;
-    $next.textContent = i === SLIDES.length - 1 ? 'เริ่มเล่น!' : 'ถัดไป →';
+    $next.textContent = i === SLIDES.length - 1 ? L('เริ่มเล่น!', 'Let’s play!') : `${L('ถัดไป', 'Next')} →`;
     $next.focus();
   };
   const close = () => {
@@ -104,7 +106,9 @@ export function initTutorial() {
   if (header && !header.querySelector('.tut-open')) {
     const b = document.createElement('button');
     b.className = 'tut-open small ghost';
-    b.textContent = '? วิธีเล่น';
+    const label = () => (b.textContent = `? ${L('วิธีเล่น', 'How to play')}`);
+    label();
+    onLang(label);
     b.addEventListener('click', showTutorial);
     header.appendChild(b);
   }

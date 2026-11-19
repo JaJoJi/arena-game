@@ -407,3 +407,11 @@ button.info { min-width: 28px; padding: 2px 6px; font-weight: 700; }
 @media (max-width: 560px) {
   .tbranches { grid-template-columns: 1fr; }
 }
+
+/* ---------- Mochi Moon header: logo + language switch ---------- */
+header .logo { font-size: 1.25rem; font-weight: 600; letter-spacing: 0.01em; display: inline-flex; align-items: center; gap: 6px;
+  background: linear-gradient(90deg, #ffe7a3, #ffb3c8 60%, #c9b6ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+header .logo-moon { -webkit-text-fill-color: initial; color: initial; filter: drop-shadow(0 0 6px rgba(255, 231, 163, 0.6)); }
+header .lang { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); }
+header .lang button { min-width: 44px; padding: 3px 8px; }
+header .lang button.on { background: var(--accent); color: #1a1420; border-color: transparent; }

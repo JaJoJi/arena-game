@@ -1,6 +1,7 @@
 import { activeBonuses, bonusValue, cellsOf, footprint, type ActiveBonus } from '../sim/grid';
 import { ARCH_NAME, SKILLS, lvOf } from '../sim/skills';
 import type { Archetype, Bonus, Rot, SkillInstance } from '../sim/types';
+import { L } from '../i18n';
 
 /**
  * Skill blocks drawn as one SVG shape each, filled with the skill's own pattern.
@@ -152,18 +153,18 @@ export const footprintAt = (k: SkillInstance, x: number, y: number) => footprint
 
 // ---------- text for tooltips ----------
 export const targetName = (t: string) =>
-  t.startsWith('arch:') ? `สาย${ARCH_NAME[t.slice(5) as Archetype]}` : SKILLS[t]?.name ?? t;
+  t.startsWith('arch:') ? L(`สาย${ARCH_NAME[t.slice(5) as Archetype]}`, `a ${ARCH_NAME[t.slice(5) as Archetype]} skill`) : SKILLS[t]?.name ?? t;
 
 export function bonusText(b: Bonus, lv: number) {
   const v = bonusValue(b.e, lv);
   const eff = {
-    dmg: `skill นี้ทำดาเมจ +${v} ทุกครั้งที่ตี`,
-    shield: `ทุกครั้งที่ skill นี้ทำงาน คุณได้โล่ +${v}`,
-    haste: 'คูลดาวน์ของ skill นี้สั้นลง 20%',
-    power: 'skill นี้แรงขึ้น 25% (ดาเมจ โล่ ฟื้นเลือด ไฟ ของ skill นี้เท่านั้น)',
-    trigger: 'เมื่อ skill นี้ทำงาน ตัวที่ติดกันนั้นทำงานทันทีด้วย (คูลดาวน์ของตัวนั้นไม่รีเซ็ต)',
+    dmg: L(`skill นี้ทำดาเมจ +${v} ทุกครั้งที่ตี`, `this skill deals +${v} damage on every hit`),
+    shield: L(`ทุกครั้งที่ skill นี้ทำงาน คุณได้โล่ +${v}`, `each time this skill works, you gain +${v} shield`),
+    haste: L('คูลดาวน์ของ skill นี้สั้นลง 20%', 'this skill’s cooldown is 20% shorter'),
+    power: L('skill นี้แรงขึ้น 25% (ดาเมจ โล่ ฟื้นเลือด ไฟ ของ skill นี้เท่านั้น)', 'this skill is 25% stronger (its own damage, shield, healing and burn only)'),
+    trigger: L('เมื่อ skill นี้ทำงาน ตัวที่ติดกันนั้นทำงานทันทีด้วย (คูลดาวน์ของตัวนั้นไม่รีเซ็ต)', 'when this skill works, that touching block works right away too (its cooldown does not reset)'),
   }[b.e];
-  return `ติดกับ <b>${targetName(b.t)}</b>: ${eff}`;
+  return L(`ติดกับ <b>${targetName(b.t)}</b>: ${eff}`, `Touching <b>${targetName(b.t)}</b>: ${eff}`);
 }
 
 export const BONUS_ICON: Record<Bonus['e'], string> = { dmg: '⚔', shield: '⛨', haste: '»', power: '▲', trigger: '⚡' };

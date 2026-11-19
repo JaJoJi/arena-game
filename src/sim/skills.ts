@@ -1,4 +1,5 @@
 import type { Archetype, SkillInstance } from './types';
+import { L } from '../i18n';
 
 /**
  * Skills are data. Each skill has a tree: Lv1 (variant ''), two Lv2 variants ('a', 'b') and two Lv3 variants under
@@ -515,14 +516,14 @@ export function chipsOf(node: SkillNode, cdTicks = node.cd): Chip[] {
         if (e.shieldPct) parts.push(`${pct(e.shieldPct)}🛡`);
         if (e.thornsX) parts.push(`🌵×${e.thornsX}`);
         if (e.burnPct) parts.push(`${pct(e.burnPct)}🔥`);
-        if (e.perRemoved) parts.push(`${e.perRemoved}/อย่าง`);
-        out.push({ kw: 'hit', text: `⚔${parts.join('+')}${e.times && e.times > 1 ? ` ×${e.times}` : ''}${e.ifSlowed ? ' (ถ้าช้า)' : ''}` });
+        if (e.perRemoved) parts.push(`${e.perRemoved}/${L('อย่าง', 'each')}`);
+        out.push({ kw: 'hit', text: `⚔${parts.join('+')}${e.times && e.times > 1 ? ` ×${e.times}` : ''}${e.ifSlowed ? L(' (ถ้าช้า)', ' (if slowed)') : ''}` });
         if (e.pierce) out.push({ kw: 'pierce', text: e.pierce >= 1 ? '🗡' : `🗡${pct(e.pierce)}` });
         if (e.exec) out.push({ kw: 'exec', text: `🎯<${pct(e.exec[0])} ×${e.exec[1]}` });
         if (e.frozen) out.push({ kw: 'shatter', text: `🧊×${e.frozen}` });
-        if (e.noShield) out.push({ kw: 'hit', text: `ไร้โล่ ×${e.noShield}` });
+        if (e.noShield) out.push({ kw: 'hit', text: `${L('ไร้โล่', 'no shield')} ×${e.noShield}` });
         if (e.leech) out.push({ kw: 'leech', text: `🩸${pct(e.leech)}` });
-        if (e.burn) out.push({ kw: 'burn', text: `🔥${e.burn[0]} ${sec(e.burn[1])}/ครั้ง` });
+        if (e.burn) out.push({ kw: 'burn', text: `🔥${e.burn[0]} ${sec(e.burn[1])}/${L('ครั้ง', 'hit')}` });
         break;
       }
       case 'shield': out.push({ kw: 'shield', text: `🛡${e.n}` }); break;
@@ -532,19 +533,19 @@ export function chipsOf(node: SkillNode, cdTicks = node.cd): Chip[] {
       case 'slow': out.push({ kw: 'slow', text: `🐌${pct(e.pct)} ${sec(e.secs)}` }); break;
       case 'delay': out.push({ kw: 'delay', text: `⏪${sec(e.secs)}` }); break;
       case 'grow': out.push({ kw: 'grow', text: `💪+${e.n}` }); break;
-      case 'charge': out.push({ kw: 'charge', text: `⚡×${e.mult}${e.hits && e.hits > 1 ? ` (${e.hits} ครั้ง)` : ''}` }); break;
-      case 'thorns': out.push({ kw: 'thorns', text: `🌵${e.n}${e.perm ? ' ถาวร' : ''}${e.heal !== undefined ? ` ศัตรูฟื้น ${pct(e.heal)}` : ''}` }); break;
-      case 'steadfast': out.push({ kw: 'steadfast', text: `🗿${e.keep !== undefined && e.keep < 0.4 ? ' 80%' : ''}${e.ignoreFreeze ? ' +กันแช่แข็ง 1 ครั้ง' : ''}` }); break;
-      case 'cleanse': out.push({ kw: 'cleanse', text: e.n >= 99 ? '✨ทั้งหมด' : e.n > 1 ? `✨×${e.n}` : '✨' }); break;
-      case 'dispel': out.push({ kw: 'dispel', text: `${e.n >= 99 ? '💥ทั้งหมด' : e.n > 1 ? `💥×${e.n}` : '💥'}${e.shield !== undefined ? ` โล่${pct(e.shield)}` : ''}${e.steal ? ' ขโมยพลัง' : ''}` }); break;
+      case 'charge': out.push({ kw: 'charge', text: `⚡×${e.mult}${e.hits && e.hits > 1 ? ` (${e.hits} ${L('ครั้ง', 'hits')})` : ''}` }); break;
+      case 'thorns': out.push({ kw: 'thorns', text: `🌵${e.n}${e.perm ? L(' ถาวร', ' permanent') : ''}${e.heal !== undefined ? ` ${L('ศัตรูฟื้น', 'enemy heals')} ${pct(e.heal)}` : ''}` }); break;
+      case 'steadfast': out.push({ kw: 'steadfast', text: `🗿${e.keep !== undefined && e.keep < 0.4 ? ' 80%' : ''}${e.ignoreFreeze ? L(' +กันแช่แข็ง 1 ครั้ง', ' +blocks 1 freeze') : ''}` }); break;
+      case 'cleanse': out.push({ kw: 'cleanse', text: e.n >= 99 ? `✨${L('ทั้งหมด', 'all')}` : e.n > 1 ? `✨×${e.n}` : '✨' }); break;
+      case 'dispel': out.push({ kw: 'dispel', text: `${e.n >= 99 ? `💥${L('ทั้งหมด', 'all')}` : e.n > 1 ? `💥×${e.n}` : '💥'}${e.shield !== undefined ? ` ${L('โล่', 'shield ')}${pct(e.shield)}` : ''}${e.steal ? L(' ขโมยพลัง', ' steals power') : ''}` }); break;
       case 'amplify': out.push({ kw: 'amplify', text: `✖2 ≤${e.cap}` }); break;
-      case 'leech': out.push({ kw: 'leech', text: `🩸${pct(e.pct)} ครั้งถัดไป` }); break;
+      case 'leech': out.push({ kw: 'leech', text: `🩸${pct(e.pct)} ${L('ครั้งถัดไป', 'next hit')}` }); break;
     }
   }
   const en = node.engine;
   if (en) {
     if (en.kind === 'gear') out.unshift({ kw: 'gear', text: `⚙${en.n && en.n > 1 ? `×${en.n}` : ''} ${pct(en.power)}` });
-    else out.unshift({ kw: 'overclock', text: `🚀 ${pct(en.power)}${en.keep ? ' ไม่รีเซ็ต' : ''}` });
+    else out.unshift({ kw: 'overclock', text: `🚀 ${pct(en.power)}${en.keep ? L(' ไม่รีเซ็ต', ' no reset') : ''}` });
   }
   out.push({ kw: 'cd', text: `⏱${(cdTicks / 10).toFixed(1)}` });
   return out;
