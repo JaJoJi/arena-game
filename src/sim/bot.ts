@@ -1,8 +1,9 @@
 import { HEROES, HEROES_BY_ID } from './heroes';
+import { activeBonuses } from './links';
 import { Rng, hashSeed } from './rng';
 import { MAX_SLOTS, PRICES, REROLL, buy, buySlot, incomeFor, newRun, priceOf, reroll, sell, slotPrice, slotsOf, toBuild, upgradeOf, type RunState } from './run';
 import { SKILLS, lvOf } from './skills';
-import { ARCHES, type Archetype, type Build } from './types';
+import { ARCHES, type Archetype, type Build, type SkillInstance } from './types';
 
 /**
  * Rule-based bot (no LLM). Plays through the same run API as a human.
@@ -85,6 +86,28 @@ export function botShopTurn(s: RunState, rules: BotRules) {
   }
 }
 
+const BONUS_W = { trigger: 2, power: 1.5, haste: 1.2, dmg: 1.5, shield: 1 } as const;
+const linkScore = (skills: SkillInstance[]) => activeBonuses(skills).reduce((n, a) => n + BONUS_W[a.b.e], 0);
+
+/** Reorder the list to turn on as many connect bonuses as possible (hill-climb over swaps). Returns the score. */
+export function arrangeList(skills: SkillInstance[]): number {
+  let best = linkScore(skills);
+  for (let pass = 0; pass < 20; pass++) {
+    let improved = false;
+    for (let i = 0; i < skills.length; i++)
+      for (let j = i + 1; j < skills.length; j++) {
+        [skills[i], skills[j]] = [skills[j], skills[i]];
+        const sc = linkScore(skills);
+        if (sc > best + 1e-9) {
+          best = sc;
+          improved = true;
+        } else [skills[i], skills[j]] = [skills[j], skills[i]];
+      }
+    if (!improved) break;
+  }
+  return best;
+}
+
 /** Build a bot's build as of `day`, by running its shop turns day by day. */
 export function aiBuild(hero: string, day: number, prefer: Archetype[], seed: number): Build {
   const s = newRun(hero, seed, 'ai');
@@ -98,6 +121,7 @@ export function aiBuild(hero: string, day: number, prefer: Archetype[], seed: nu
       s.gold += 1;
     }
     botShopTurn(s, rules);
+    arrangeList(s.skills);
   }
   return toBuild(s);
 }

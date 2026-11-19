@@ -1,4 +1,5 @@
 import { HEROES_BY_ID, type CombatHooks, type HookFighter } from './heroes';
+import { activeBonuses, bonusTotals } from './links';
 import { Rng } from './rng';
 import { SKILLS, execNode, lvOf, nodeOf, type Ctx, type FighterView } from './skills';
 import type {
@@ -11,11 +12,12 @@ import type {
  * the result and the browser (or a shared replay link) just plays it back.
  *
  * Every equipped skill runs its own cooldown at the same time. When it is ready it fires.
- * Skills do not interact by position: the list order only breaks ties (top skill fires first).
+ * Connect bonuses work when the skill right above or below matches their condition. A trigger bonus makes the
+ * matching neighbour fire right away too, without resetting its cooldown. Ties fire top to bottom.
  */
 
 /** Bump when combat rules or numbers change: old replays can no longer be re-simulated. */
-export const SIM_VERSION = 8;
+export const SIM_VERSION = 9;
 export const TPS = 10; // ticks per second
 export const MAX_TICKS = 90 * TPS;
 /**
@@ -37,6 +39,8 @@ const FREEZE_DR_DECAY = 4 * TPS; // one stack of diminishing returns wears off e
 /** Total frozen time per fight (≈25% of the target fight length); after that freezes are resisted. */
 export const freezeCap = (day: number) => (day <= 3 ? 2 : day <= 7 ? 4.5 : 6) * TPS;
 const SLOW_CAP = 0.5;
+/** longest trigger chain (each skill fires at most once per chain anyway) */
+const MAX_CHAIN = 8;
 /** A thorns stack lasts this long, so thorns cannot pile up for the whole fight. */
 export const THORNS_TICKS = 10 * TPS;
 /** A reflection is at most this share of the hit that caused it. */
@@ -50,6 +54,13 @@ interface Block {
   idx: number;
   cd: number;
   prog: number;
+  /** all numbers of this skill ×power (connect bonus) */
+  power: number;
+  /** + damage on every hit / + shield on every fire, from connect bonuses */
+  dmg: number;
+  shieldOnFire: number;
+  /** blocks (indexes into fighter.blocks) this one sets off when it fires */
+  triggers: number[];
 }
 
 /** A buff stack remembers which block made it, so damage can be credited and dispel removes one stack. */
@@ -99,18 +110,28 @@ interface Fighter {
 
 const sum = (xs: Stack[]) => xs.reduce((n, x) => n + x.v, 0);
 
-export function cdTicks(k: Pick<SkillInstance, 'id' | 'v' | 'mark'>): number {
-  const base = nodeOf(k).cd * (k.mark === 'quick' ? 0.6 : 1);
+/** haste = cooldown cut from connect bonuses (0.2 per haste bonus, at most halved) */
+export function cdTicks(k: Pick<SkillInstance, 'id' | 'v' | 'mark'>, haste = 0): number {
+  const base = nodeOf(k).cd * (k.mark === 'quick' ? 0.6 : 1) * Math.max(0.5, 1 - haste);
   return Math.max(5, Math.round(base));
 }
 
 function makeBlocks(b: Build): Block[] {
-  return b.skills
-    .map((inst, idx) => ({ inst: { ...inst }, idx, cd: SKILLS[inst.id] ? cdTicks(inst) : 0, prog: 0 }))
-    .filter((blk) => SKILLS[blk.inst.id]);
+  const skills = b.skills.filter((k) => SKILLS[k.id]);
+  const act = activeBonuses(skills);
+  const out: Block[] = [];
+  b.skills.forEach((inst, idx) => {
+    if (!SKILLS[inst.id]) return;
+    const t = bonusTotals(skills, out.length, act);
+    out.push({
+      inst: { ...inst }, idx, cd: cdTicks(inst, t.haste), prog: 0,
+      power: t.power, dmg: t.dmg, shieldOnFire: t.shield, triggers: t.triggers, // indexes into `skills` = into blocks
+    });
+  });
+  return out;
 }
 
-const emptyStat = (): BlockStat => ({ c: 0, d: 0, bf: 0, h: 0, sh: 0, fz: 0 });
+const emptyStat = (): BlockStat => ({ c: 0, tc: 0, d: 0, bd: 0, bf: 0, h: 0, sh: 0, fz: 0 });
 
 function makeFighter(b: Build, side: Side, day: number): Fighter {
   const hooks = HEROES_BY_ID[b.hero]?.hooks ?? {};
@@ -196,7 +217,7 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
 
   /** owner = the attacker's block that gets credit (idx into its build.skills), -1 = none */
   /** shieldable: true / false, or the share of the hit (0..1) that shields can block */
-  function deal(target: Fighter, amount: number, shieldable: boolean | number, src: string, owner = -1) {
+  function deal(target: Fighter, amount: number, shieldable: boolean | number, src: string, owner = -1, bonusPart = 0) {
     if (amount <= 0 || target.hp <= 0) return;
     let blocked = 0;
     const share = shieldable === true ? 1 : shieldable === false ? 0 : shieldable;
@@ -206,7 +227,10 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
     }
     target.hp -= amount - blocked;
     const st = F[1 - target.side].stats[owner];
-    if (st) st.d += amount;
+    if (st) {
+      st.d += amount;
+      st.bd += Math.min(amount, bonusPart);
+    }
     emit({ type: 'damage', side: target.side, amount: amount - blocked, blocked, src });
     target.hooks.onDamaged?.(hookApi(target), amount - blocked, src);
   }
@@ -216,7 +240,8 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
     emit({ type: 'status', side: foe.side, status: 'burn', value: foe.burns.reduce((n, x) => n + x.dps, 0) });
   }
 
-  function runSkill(f: Fighter, foe: Fighter, blk: Block, power: number) {
+  /** power = cast power (connect bonus × echo); bonusDmg = + damage per hit from connect bonuses */
+  function runSkill(f: Fighter, foe: Fighter, blk: Block, power: number, bonusDmg: number) {
     const inst = blk.inst;
     const st = f.stats[blk.idx];
     const thornsUntil = () => t + (f.hooks.thornsSecs ? f.hooks.thornsSecs * TPS : THORNS_TICKS);
@@ -227,8 +252,11 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
       hit(n, o = {}) {
         if (foe.hp <= 0 || f.hp <= 0) return 0;
         const mult = f.charge;
-        let dmg = Math.round((n + sum(f.growth)) * mult);
+        let dmg = Math.round((n + sum(f.growth) + bonusDmg) * mult);
         if (f.hooks.onHit) dmg = Math.max(0, Math.round(f.hooks.onHit(hookApi(f), dmg)));
+        // credit for connect bonuses: the +damage bonus plus the share added by power bonuses
+        const fromPower = blk.power > 1 ? n - n / blk.power : 0;
+        const bonusPart = Math.round((bonusDmg + fromPower) * mult);
         // credit for buffs: each พลัง stack's owner gets its share, the charge's owner gets the multiplier's extra
         for (const g of f.growth) if (f.stats[g.idx]) f.stats[g.idx].bf += Math.round(g.v * mult);
         if (mult > 1 && f.stats[f.chargeIdx]) f.stats[f.chargeIdx].bf += dmg - Math.round(dmg / mult);
@@ -240,7 +268,7 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
         }
         const pierce = o.pierce ?? 0;
         const hpBefore = foe.hp;
-        deal(foe, dmg, 1 - pierce, inst.id, blk.idx);
+        deal(foe, dmg, 1 - pierce, inst.id, blk.idx, bonusPart);
         const dealt = Math.max(0, hpBefore - Math.max(0, foe.hp)) + 0;
         const leech = (o.leech ?? 0) + f.leechNext;
         f.leechNext = 0;
@@ -394,20 +422,46 @@ export function simulate(a: Build, b: Build, seed: number, day = 1, opts: { trac
     execNode(nodeOf(inst), ctx);
   }
 
-  /** Fires one skill (plus its mark effects). */
-  function fire(f: Fighter, bi: number) {
+  /** Fires one skill (plus its mark effects and shield-on-fire bonus). from = block that triggered it. */
+  function fireOne(f: Fighter, bi: number, from: number | undefined) {
     const foe = F[1 - f.side];
-    if (f.hp <= 0 || foe.hp <= 0) return;
     const blk = f.blocks[bi];
     const inst = blk.inst;
-    f.stats[blk.idx].c++;
-    emit({ type: 'cast', side: f.side, skill: inst.id, lv: lvOf(inst.v), idx: blk.idx });
-    runSkill(f, foe, blk, 1);
+    const st = f.stats[blk.idx];
+    if (from === undefined) st.c++;
+    else st.tc++;
+    emit({
+      type: 'cast', side: f.side, skill: inst.id, lv: lvOf(inst.v), idx: blk.idx,
+      ...(from !== undefined ? { from: f.blocks[from].idx } : {}),
+    });
+    runSkill(f, foe, blk, blk.power, blk.dmg);
+    if (blk.shieldOnFire > 0 && f.hp > 0) {
+      f.shield += blk.shieldOnFire;
+      st.sh += blk.shieldOnFire;
+      emit({ type: 'shield', side: f.side, amount: blk.shieldOnFire });
+    }
     if (inst.mark === 'echo' && foe.hp > 0 && f.hp > 0) {
       emit({ type: 'cast', side: f.side, skill: inst.id, lv: lvOf(inst.v), idx: blk.idx, echo: true });
-      runSkill(f, foe, blk, 0.5);
+      runSkill(f, foe, blk, blk.power * 0.5, Math.round(blk.dmg * 0.5));
     }
     if (inst.mark === 'burn' && foe.hp > 0) addBurn(foe, 1, 3, blk.idx);
+  }
+
+  /** Fire a skill, then the neighbours its trigger bonuses set off (breadth-first), each at most once per chain. */
+  function fire(f: Fighter, start: number) {
+    const seen = new Set<number>([start]);
+    const queue: { bi: number; depth: number; from?: number }[] = [{ bi: start, depth: 0 }];
+    while (queue.length) {
+      const q = queue.shift()!;
+      if (f.hp <= 0 || F[1 - f.side].hp <= 0) return;
+      fireOne(f, q.bi, q.from);
+      if (q.depth >= MAX_CHAIN) continue;
+      for (const bi of f.blocks[q.bi].triggers) {
+        if (seen.has(bi)) continue;
+        seen.add(bi);
+        queue.push({ bi, depth: q.depth + 1, from: q.bi });
+      }
+    }
   }
 
   function act(f: Fighter) {

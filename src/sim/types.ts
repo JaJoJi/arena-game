@@ -3,15 +3,31 @@ export const ARCHES: Archetype[] = ['tank', 'burst', 'scaling', 'control'];
 
 export type Mark = 'burn' | 'echo' | 'quick' | 'steadfast';
 
-/** One equipped skill. Every skill runs its own cooldown in parallel; skills do not interact by position. */
+/**
+ * Connect bonus effects (values in links.ts bonusValue):
+ * dmg: every hit of this skill deals more · shield: gain shield when it fires
+ * haste: shorter cooldown · power: all numbers of this skill stronger
+ * trigger: when it fires, the matching neighbour fires right away too (its cooldown is not reset)
+ */
+export type BonusKind = 'dmg' | 'shield' | 'haste' | 'power' | 'trigger';
+
+/** Active when the skill right above or right below matches t: a skill id, or 'arch:<archetype>'. */
+export interface Bonus {
+  t: string;
+  e: BonusKind;
+}
+
+/** One equipped skill. Every skill runs its own cooldown in parallel; neighbours in the list can turn on connect bonuses. */
 export interface SkillInstance {
   id: string;
   /** tree variant: '' = Lv1, 'a' / 'b' = Lv2, 'a1' 'a2' 'b1' 'b2' = Lv3 (see skills.ts) */
   v: string;
   mark?: Mark;
+  /** connect bonuses rolled when this copy was bought (kept through upgrades) */
+  bonus?: Bonus[];
 }
 
-/** A build is a hero plus its skill list (shown top to bottom; the order does not change the fight). */
+/** A build is a hero plus its skill list, top to bottom. Neighbours (above / below) can turn on connect bonuses. */
 export interface Build {
   hero: string;
   skills: SkillInstance[];
@@ -54,8 +70,12 @@ export interface Fx {
 
 /** Per-block stats for the post-fight breakdown. Index = build.skills index. */
 export interface BlockStat {
-  /** fires */
+  /** fires on its own cooldown */
   c: number;
+  /** fires set off by a neighbour's trigger bonus */
+  tc: number;
+  /** damage that came from connect bonuses (+damage and power) */
+  bd: number;
   /** damage dealt (including what shields blocked) */
   d: number;
   /** damage that this block's buffs (พลังโจมตี stacks, รวมพลัง) added to hits of ANY block */
@@ -76,7 +96,7 @@ export interface Snap {
 
 export type EventBody =
   /** idx = index into that side's build.skills */
-  | { type: 'cast'; side: Side; skill: string; lv: number; idx: number; echo?: boolean }
+  | { type: 'cast'; side: Side; skill: string; lv: number; idx: number; echo?: boolean; /** set off by this skill's trigger bonus */ from?: number }
   | { type: 'damage'; side: Side; amount: number; blocked: number; src: string }
   | { type: 'shield'; side: Side; amount: number }
   | { type: 'heal'; side: Side; amount: number }

@@ -8,6 +8,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { SIM_VERSION, simulate } from '../sim/combat';
 import { randomAiBuild } from '../sim/bot';
 import { HEROES_BY_ID } from '../sim/heroes';
+import { BONUS_KINDS, MAX_BONUS, validTarget } from '../sim/links';
 import { SKILLS, isVariant } from '../sim/skills';
 import { MAX_SLOTS, slotsFor } from '../sim/run';
 import type { Build, Mark } from '../sim/types';
@@ -89,7 +90,13 @@ function validateBuild(x: unknown, day: number): Build | string {
     if (SKILLS[s.id].hero && SKILLS[s.id].hero !== b.hero) return 'skill not allowed for hero';
     if (!isVariant(s.v)) return 'bad level';
     if (s.mark !== undefined && !MARKS.includes(s.mark)) return 'bad mark';
-    skills.push({ id: s.id, v: s.v, ...(s.mark ? { mark: s.mark } : {}) });
+    const bonus = s.bonus ?? [];
+    if (!Array.isArray(bonus) || bonus.length > MAX_BONUS) return 'bad bonus';
+    for (const x of bonus) if (!BONUS_KINDS.includes(x?.e) || !validTarget(String(x?.t), b.hero)) return 'bad bonus';
+    skills.push({
+      id: s.id, v: s.v, ...(s.mark ? { mark: s.mark } : {}),
+      ...(bonus.length ? { bonus: bonus.map((x) => ({ t: String(x.t), e: x.e })) } : {}),
+    });
   }
   if (new Set(skills.map((s) => s.id)).size !== skills.length) return 'duplicate skill';
   return { hero: b.hero, skills };

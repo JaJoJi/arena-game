@@ -1,7 +1,8 @@
 import { Rng, hashSeed } from './rng';
 import { HEROES, HEROES_BY_ID } from './heroes';
+import { rollBonuses } from './links';
 import { SKILLS, SKILL_LIST, lvOf, nextVariants } from './skills';
-import type { Build, Mark, SkillInstance } from './types';
+import type { Bonus, Build, Mark, SkillInstance } from './types';
 
 /** One run (รอบ) of the game: pick skills day by day until 8 wins or HP runs out. */
 
@@ -18,12 +19,13 @@ export const DAY1_GOLD = 7;
 export const MAX_SLOTS = 8;
 
 /**
- * Shop offer: a skill at a tree variant. v = '' is a new Lv1 skill; any other v is an upgrade of a skill you own
- * (its next variant, one of two, picked at random by the shop).
+ * Shop offer: a skill at a tree variant. v = '' is a new Lv1 skill (with its rolled connect bonuses); any other v is
+ * an upgrade of a skill you own (its next variant, one of two, picked at random by the shop; the skill keeps its bonuses).
  */
 export interface Offer {
   id: string;
   v: string;
+  bonus?: Bonus[];
 }
 
 /** Heroes offered when a run starts (5 later with the pass). */
@@ -62,7 +64,7 @@ export interface LogEntry {
 }
 
 export interface RunState {
-  v: 6;
+  v: 7;
   id: string;
   seed: number;
   hero: string;
@@ -124,7 +126,7 @@ export function incomeFor(day: number, streak: number) {
 
 export function newRun(hero: string, seed: number, id: string): RunState {
   const s: RunState = {
-    v: 6, id, seed, hero, day: 1, hp: START_HP, wins: 0, losses: 0, gold: 0, streak: 0,
+    v: 7, id, seed, hero, day: 1, hp: START_HP, wins: 0, losses: 0, gold: 0, streak: 0,
     lastIncome: { base: 0, bonus: 0 }, bonusSlots: 0, slotBuys: 0, skills: [], shop: [], rolls: 0,
     ghost: false, pendingMark: null, phase: 'shop', rating: 1000, log: [],
   };
@@ -154,7 +156,9 @@ export function upgradeOf(s: RunState, o: Offer): SkillInstance | null {
  */
 function rollShop(s: RunState) {
   if (s.day <= 1) {
-    s.shop = (HEROES_BY_ID[s.hero]?.day1 ?? []).slice(0, SHOP_SIZE).map((id) => ({ id, v: '' }));
+    // same skills every run; their connect bonuses are rolled per run
+    const brng = new Rng(hashSeed(s.seed, 'day1'));
+    s.shop = (HEROES_BY_ID[s.hero]?.day1 ?? []).slice(0, SHOP_SIZE).map((id) => ({ id, v: '', bonus: rollBonuses(brng, id, s.hero) }));
     return;
   }
   const rng = new Rng(hashSeed(s.seed, s.day, s.rolls));
@@ -168,7 +172,10 @@ function rollShop(s: RunState) {
       const id = ups.splice(rng.int(ups.length), 1)[0];
       const k = s.skills.find((x) => x.id === id)!;
       picks.push({ id, v: rng.pick(nextVariants(k.v)) });
-    } else picks.push({ id: fresh.splice(rng.int(fresh.length), 1)[0], v: '' });
+    } else {
+      const id = fresh.splice(rng.int(fresh.length), 1)[0];
+      picks.push({ id, v: '', bonus: rollBonuses(rng, id, s.hero) });
+    }
   }
   s.shop = picks;
 }
@@ -191,7 +198,7 @@ export function buy(s: RunState, i: number): string | null {
   if (offer.v === '') {
     if (s.skills.some((k) => k.id === offer.id)) return 'มี skill นี้แล้ว';
     if (s.skills.length >= slotsOf(s)) return 'ช่อง skill เต็ม ขาย skill หรือซื้อช่องเพิ่มก่อน';
-    s.skills.push({ id: offer.id, v: '' });
+    s.skills.push({ id: offer.id, v: '', bonus: (offer.bonus ?? []).map((b) => ({ ...b })) });
   } else {
     const owned = upgradeOf(s, offer);
     if (!owned) return 'อัปเกรดนี้ใช้กับ skill ที่มีอยู่ไม่ได้แล้ว';
@@ -209,7 +216,7 @@ export function sell(s: RunState, i: number) {
   s.skills.splice(i, 1);
 }
 
-/** Move skill i up (-1) or down (+1) in the list. Order only matters for ties (top fires first). */
+/** Move skill i up (-1) or down (+1) in the list. Neighbours decide which connect bonuses are on. */
 export function moveSkill(s: RunState, i: number, dir: -1 | 1) {
   const j = i + dir;
   if (!s.skills[i] || !s.skills[j]) return;
