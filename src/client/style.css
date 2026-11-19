@@ -26,7 +26,7 @@ header { max-width: 960px; margin: 0 auto; padding: 8px 16px; color: var(--accen
 header small { color: var(--muted); }
 /* keep the combat strip at most ~45% of the viewport height so the UI stays visible */
 #stage { max-width: min(960px, 96vh); aspect-ratio: 640 / 300; margin: 0 auto; overflow: hidden; }
-#stage canvas { image-rendering: pixelated; display: block; }
+#stage canvas { display: block; }
 #panel { max-width: 960px; margin: 0 auto; padding: 8px 16px 48px; }
 h2 { margin: 12px 0 6px; }
 h3 { margin: 16px 0 6px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -286,13 +286,12 @@ details summary { cursor: pointer; color: var(--accent); }
 /* ---------- hero portraits (2-frame strip, CSS-animated) ---------- */
 .hero-art {
   --s: 4; display: block; align-self: center; width: calc(32px * var(--s)); height: calc(32px * var(--s));
-  background-repeat: no-repeat; background-size: calc(64px * var(--s)) calc(32px * var(--s));
-  image-rendering: pixelated; animation: hero-breathe 1s steps(2) infinite;
   background-color: rgba(255, 255, 255, 0.03); border-radius: 8px; margin-bottom: 4px;
 }
+.hero-art svg { display: block; width: 100%; height: 100%; transform-origin: 50% 92%; animation: hero-breathe 1.6s ease-in-out infinite; }
 .hero-art.small { --s: 2.5; }
-@keyframes hero-breathe { from { background-position: 0 0; } to { background-position: calc(-64px * var(--s)) 0; } }
-@media (prefers-reduced-motion: reduce) { .hero-art { animation: none; } }
+@keyframes hero-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.015, 0.97); } }
+@media (prefers-reduced-motion: reduce) { .hero-art svg { animation: none; } }
 .hero:hover .hero-art { background-color: rgba(255, 255, 255, 0.08); }
 
 /* C6 fight explanation */

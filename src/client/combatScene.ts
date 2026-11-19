@@ -1,8 +1,11 @@
 import Phaser from 'phaser';
+import { ZOOM } from './view';
 import { footprint } from '../sim/grid';
 import { SKILLS } from '../sim/skills';
 import type { Build, CombatEvent, CombatResult, CooldownTrace, Fx, Side } from '../sim/types';
-import { makeTextures } from './sprites';
+import { hashSeed } from '../sim/rng';
+import { CHIBI_ORIGIN_Y, chibiScale, ensureChibi } from './chibi';
+import { drawArenaBackdrop } from './townArt';
 
 let resolveReady!: (s: CombatScene) => void;
 export const sceneReady = new Promise<CombatScene>((r) => (resolveReady = r));
@@ -16,6 +19,12 @@ const ARCH_COLOR: Record<string, number> = {
   tank: 0x5aa0e6, burst: 0xe65a5a, scaling: 0xe6b45a, control: 0x7fe0f0, none: 0xaaaaaa,
 };
 const SIDE_COLOR = ['#9fd3ff', '#ffaaaa'];
+/** chibi height in world units, feet to the top of the art */
+const HERO_H = 116;
+const HERO_S = chibiScale(HERO_H);
+
+/** Look seed of a fighter: the one saved in the build, else one made from the player name (old builds, AI). */
+const lookSeed = (side: { name: string; build: Build }) => side.build.look ?? hashSeed(side.name, side.build.hero);
 
 export interface PlayData {
   result: CombatResult;
@@ -26,7 +35,15 @@ export interface PlayData {
 /** Side-view replay: our hero left, enemy right, executing skill in the center. */
 export class CombatScene extends Phaser.Scene {
   speed = 2;
-  private fighters!: Phaser.GameObjects.Sprite[];
+  private fighters!: Phaser.GameObjects.Image[];
+  /** texture prefix per fighter once its chibi textures are ready (see ensureChibi) */
+  private keys: (string | null)[] = [null, null];
+  /** latest show() request per fighter, so a slow texture load can't overwrite a newer one */
+  private want = ['', ''];
+  private showSeq = 0;
+  private dead = [false, false];
+  private poseUntil = [0, 0];
+  private poseKind: ('cast' | 'hit' | null)[] = [null, null];
   private bars!: Phaser.GameObjects.Graphics;
   private queue!: Phaser.GameObjects.Graphics;
   private nameTexts!: Phaser.GameObjects.Text[];
@@ -66,10 +83,10 @@ export class CombatScene extends Phaser.Scene {
   }
 
   create() {
-    makeTextures(this);
+    this.cameras.main.setOrigin(0, 0).setZoom(ZOOM);
     this.drawBackground();
     this.fighters = [0, 1].map((i) =>
-      this.add.sprite(POS[i], GROUND, 'hero_knight').setOrigin(0.5, 1).setScale(3).setFlipX(i === 1),
+      this.add.image(POS[i], GROUND, '__DEFAULT').setOrigin(0.5, CHIBI_ORIGIN_Y).setScale(HERO_S).setFlipX(i === 1).setVisible(false),
     );
     this.bars = this.add.graphics();
     this.queue = this.add.graphics();
@@ -96,59 +113,11 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private drawBackground() {
-    const g = this.add.graphics();
-    let seed = 7;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    // afternoon sky above the colosseum
-    const bands = [0x3d5fa8, 0x5276bb, 0x6a8cc8, 0x86a4d6];
-    bands.forEach((c, i) => g.fillStyle(c).fillRect(0, i * 18, W, 18));
-    // stands: stone tiers packed with a cheering crowd
-    const top = 72;
-    g.fillStyle(0x8a7c6a).fillRect(0, top, W, GROUND - top);
-    for (let x = 0; x < W; x += 12) g.fillStyle(0x8a7c6a).fillRect(x, top - 6, 8, 6); // crenellations
-    const crowd = [0xe0a070, 0xc0603c, 0x4f72b8, 0xe9b949, 0x7b3fa0, 0xf3efe6, 0x5aa04a, 0x9a3a3a];
-    for (let row = 0; row < 6; row++) {
-      const y = top + 8 + row * 18;
-      g.fillStyle(0x6e6252).fillRect(0, y + 12, W, 4); // tier edge
-      for (let x = 2; x < W; x += 6) {
-        if (rnd() < 0.85) {
-          g.fillStyle(crowd[Math.floor(rnd() * crowd.length)]).fillRect(x, y + 4, 4, 6);
-          g.fillStyle(0xe8c49a).fillRect(x + 1, y + 1, 2, 3); // heads
-        }
-      }
-    }
-    // royal box in the middle with banners
-    g.fillStyle(0x6e6252).fillRect(W / 2 - 50, top - 22, 100, 34);
-    g.fillStyle(0x7b3fa0).fillRect(W / 2 - 44, top - 16, 88, 22);
-    g.fillStyle(0xe9b949).fillRect(W / 2 - 44, top - 16, 88, 3).fillRect(W / 2 - 6, top - 12, 12, 10);
-    for (const bx of [60, 180, 440, 560]) {
-      g.fillStyle(bx < W / 2 ? 0xb5463c : 0x3e5fae).fillRect(bx, top, 16, 34);
-      g.fillStyle(0xe9b949).fillRect(bx, top, 16, 3).fillRect(bx + 5, top + 10, 6, 6);
-      g.fillStyle(bx < W / 2 ? 0xb5463c : 0x3e5fae).fillRect(bx + 3, top + 34, 10, 3);
-    }
-    // arena wall with dark gates
-    g.fillStyle(0x6b5f50).fillRect(0, GROUND - 36, W, 36);
-    g.fillStyle(0x7d705e).fillRect(0, GROUND - 36, W, 4);
-    for (const gx of [30, 300, 580]) {
-      g.fillStyle(0x1d1612).fillRect(gx, GROUND - 30, 30, 30).fillRect(gx + 3, GROUND - 33, 24, 3);
-      g.fillStyle(0xaab4c0);
-      for (let x = gx + 3; x < gx + 30; x += 5) g.fillRect(x, GROUND - 30, 1, 30);
-    }
-    for (const tx of [120, 240, 400, 520]) {
-      g.fillStyle(0x4a3424).fillRect(tx, GROUND - 30, 3, 16);
-      g.fillStyle(0xffb347).fillRect(tx - 2, GROUND - 36, 7, 6);
-      g.fillStyle(0xffe08a).fillRect(tx, GROUND - 38, 3, 4);
-    }
-    // sand floor
-    g.fillStyle(0xd8b878).fillRect(0, GROUND, W, H - GROUND);
-    g.fillStyle(0xc4a262).fillRect(0, GROUND, W, 3);
-    for (let i = 0; i < 120; i++) {
-      g.fillStyle(rnd() < 0.5 ? 0xc4a262 : 0xe6cc94).fillRect(Math.floor(rnd() * W), GROUND + 6 + Math.floor(rnd() * 40), 3, 2);
-    }
+    drawArenaBackdrop(this, W, H, GROUND);
   }
 
   /** Shop / menu: show our hero standing alone. */
-  idle(hero: string | null) {
+  idle(hero: string | null, look = 0) {
     this.playing = false;
     this.tweens.killAll();
     this.banner.setText('');
@@ -162,21 +131,33 @@ export class CombatScene extends Phaser.Scene {
     this.chips.forEach((row) => row.forEach((c) => c.setVisible(false)));
     this.nameTexts.forEach((t) => t.setText(''));
     this.fighters.forEach((f, i) => {
-      f.stop();
-      f.chain();
-      f.setAngle(0).setAlpha(1).clearTint().setX(POS[i]);
-      f.setVisible(false);
+      f.setAngle(0).setAlpha(1).clearTint().setX(POS[i]).setVisible(false);
+      this.keys[i] = null;
+      this.want[i] = '';
+      this.dead[i] = false;
+      this.poseKind[i] = null;
     });
-    if (hero) {
-      this.fighters[0].setTexture('hero_' + hero).setVisible(true).setX(W / 2).play('idle_' + hero);
-    }
+    if (hero) this.show(0, hero, look, W / 2);
+  }
+
+  /** Put a chibi on a fighter slot; it appears once its textures are made (first time only takes a moment). */
+  private show(i: number, hero: string, seed: number, x: number) {
+    const f = this.fighters[i];
+    const token = `${++this.showSeq}`;
+    this.want[i] = token;
+    f.setX(x);
+    void ensureChibi(this, hero, seed).then((prefix) => {
+      if (this.want[i] !== token) return;
+      this.keys[i] = prefix;
+      f.setTexture(prefix + '_idle').setScale(HERO_S).setVisible(true);
+    });
   }
 
   play(data: PlayData, onEvent: (e: CombatEvent) => void, onDone: () => void) {
     this.idle(null);
     this.builds = [data.left.build, data.right.build];
     [data.left, data.right].forEach((side, i) => {
-      this.fighters[i].setTexture('hero_' + side.build.hero).setVisible(true).setX(POS[i]).play({ key: 'idle_' + side.build.hero, delay: i * 250 });
+      this.show(i, side.build.hero, lookSeed(side), POS[i]);
       this.nameTexts[i].setText(side.name);
     });
     this.maxHp = [...data.result.maxHp];
@@ -218,6 +199,15 @@ export class CombatScene extends Phaser.Scene {
     this.clockText.setText((Math.min(this.clock, lastT) / 10).toFixed(1) + ' วิ');
     const now = this.time.now;
     this.fighters.forEach((f, i) => {
+      const key = this.keys[i];
+      if (!key || this.dead[i]) return;
+      if (this.poseKind[i] && now > this.poseUntil[i]) {
+        this.poseKind[i] = null;
+        f.setTexture(key + '_idle');
+      }
+      // soft mochi breathing: squash and stretch around the feet
+      const b = Math.sin(now / 300 + i * 1.7);
+      f.setScale(HERO_S * (1 + b * 0.012), HERO_S * (1 - b * 0.02));
       if (now < this.flashUntil[i]) f.setTintFill(0xffffff);
       else if (this.clock < this.frozenUntil[i]) f.setTint(0x88ccff);
       else f.clearTint();
@@ -233,12 +223,13 @@ export class CombatScene extends Phaser.Scene {
 
   /** Short cast / hit pose, then back to the idle loop. Ignored once the fighter is down. */
   private pose(side: number, kind: 'cast' | 'hit') {
-    const f = this.fighters[side];
-    const hero = this.builds[side]?.hero;
-    if (!hero || f.anims.currentAnim?.key === 'dead_' + hero) return;
-    if (kind === 'hit' && f.anims.currentAnim?.key === 'cast_' + hero && f.anims.isPlaying) return; // casting wins
-    f.chain();
-    f.play({ key: `${kind}_${hero}`, frameRate: Math.min(30, (kind === 'cast' ? 8 : 10) * Math.max(1, this.speed * 0.6)) }).chain('idle_' + hero);
+    const key = this.keys[side];
+    if (!key || this.dead[side]) return;
+    const now = this.time.now;
+    if (kind === 'hit' && this.poseKind[side] === 'cast' && now < this.poseUntil[side]) return; // casting wins
+    this.poseKind[side] = kind;
+    this.poseUntil[side] = now + this.dur(kind === 'cast' ? 380 : 300);
+    this.fighters[side].setTexture(`${key}_${kind}`);
   }
 
   private dur(ms: number) {
@@ -336,9 +327,11 @@ export class CombatScene extends Phaser.Scene {
         ([0, 1] as Side[]).forEach((s) => {
           if (w !== -1 && s !== w) {
             const f = this.fighters[s];
-            f.stop();
-            f.chain();
-            f.play('dead_' + this.builds[s].hero);
+            const key = this.keys[s];
+            if (!key) return;
+            this.dead[s] = true;
+            f.setTexture(key + '_hit').setScale(HERO_S).setTint(0xa49cbc);
+            this.tweens.add({ targets: f, angle: s === 0 ? -84 : 84, alpha: 0.85, duration: 380, ease: 'Bounce.easeOut' });
           }
         });
         break;

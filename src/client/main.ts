@@ -3,6 +3,7 @@ import { CombatScene, H, W, sceneReady } from './combatScene';
 import { TownScene, townReady } from './townScene';
 import { initTutorial } from './tutorial';
 import { startUI, type Stage } from './ui';
+import { ZOOM } from './view';
 import './style.css';
 
 async function boot() {
@@ -15,10 +16,10 @@ async function boot() {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'stage',
-    width: W,
-    height: H,
-    backgroundColor: '#14181f',
-    pixelArt: true,
+    width: W * ZOOM,
+    height: H * ZOOM,
+    backgroundColor: '#231c48',
+    antialias: true,
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_HORIZONTALLY },
     scene: [TownScene, CombatScene], // both start; the UI keeps one awake and sleeps the other
   });
@@ -35,5 +36,13 @@ async function boot() {
   startUI(stage);
   initTutorial();
 }
+
+// Text is rasterised at ZOOM x so it stays sharp on the zoomed cameras.
+type TextFactory = { text: (...a: unknown[]) => Phaser.GameObjects.Text };
+const factory = Phaser.GameObjects.GameObjectFactory.prototype as unknown as TextFactory;
+const addText = factory.text;
+factory.text = function (this: unknown, ...a: unknown[]) {
+  return addText.apply(this, a).setResolution(ZOOM);
+};
 
 void boot();

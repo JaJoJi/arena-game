@@ -11,6 +11,9 @@ export interface BuildingInfo {
 
 export const WORLD_W = 2400;
 
+/** The giant mochi rabbit statue in the town square (decoration, not a building). */
+export const RABBIT_X = 1475;
+
 export const BUILDINGS: BuildingInfo[] = [
   {
     id: 'mine', name: 'เหมือง', x: 230, open: false,
@@ -37,7 +40,7 @@ export const BUILDINGS: BuildingInfo[] = [
     future: 'กฎประจำวันที่หมุนเวียน 20–30 แบบ เปลี่ยนว่าฮีโร่และแนว build ไหนเด่นในวันนั้น',
   },
   {
-    id: 'market', name: 'ตลาด', x: 1620, open: false,
+    id: 'market', name: 'ตลาด', x: 1700, open: false,
     desc: 'ซื้อขายตั๋วและของกับผู้เล่นอื่น',
     future: 'ตั้งขายผ่านตลาดที่หักค่าธรรมเนียมและเก็บประวัติ ไม่มีการโอนตรงระหว่างบัญชี',
   },

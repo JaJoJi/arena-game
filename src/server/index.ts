@@ -98,7 +98,8 @@ function validateBuild(x: unknown): Build | string {
     });
   }
   if (new Set(skills.map((s) => s.id)).size !== skills.length) return 'duplicate skill';
-  const build: Build = { hero: b.hero, w: b.w, h: b.h, skills };
+  const look = Number.isInteger(b.look) && b.look! > 0 && b.look! < 2 ** 32 ? b.look : undefined;
+  const build: Build = { hero: b.hero, w: b.w, h: b.h, skills, ...(look ? { look } : {}) };
   if (typeof occupancy(build.skills, build.w, build.h) === 'string') return 'bad placement';
   return build;
 }

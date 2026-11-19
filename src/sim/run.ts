@@ -257,10 +257,13 @@ export function unplace(s: RunState, i: number): string | null {
 }
 
 /** Only placed blocks fight. */
+/** Each run rolls a fresh look for its hero (cosmetic only); derived from the run seed so old saves get one too. */
+export const lookOf = (s: RunState) => hashSeed(s.seed, 'look') || 1;
+
 export const toBuild = (s: RunState): Build => {
   const { w, h } = gridOf(s);
   return {
-    hero: s.hero, w, h,
+    hero: s.hero, w, h, look: lookOf(s),
     skills: s.skills.filter((k) => k.x >= 0).map((k) => ({ ...k, bonus: k.bonus.map((b) => ({ ...b })) })),
   };
 };
