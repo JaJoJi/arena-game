@@ -364,6 +364,7 @@ export function makeTextures(scene: Phaser.Scene) {
       if (!tex) continue;
       drawHero(tex.getContext(), hero, pose);
       tex.refresh();
+      tex.setFilter(1 as Phaser.Textures.FilterMode); // NEAREST: keeps the 32px heroes crisp until mochi sprites replace them
     }
     const anims: [string, Pose[], number, number][] = [
       [`idle_${hero}`, ['idle', 'breathe'], 2, -1],

@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { HEROES } from '../sim/heroes';
 import { makeTextures } from './sprites';
-import { drawTownBackdrop, makeTownArt } from './townArt';
-import { BUILDINGS, BUILDING_BY_ID, WORLD_W } from './townData';
+import { drawTownBackdrop, FOLK_COLORS, makeTownArt, R, RABBIT } from './townArt';
+import { BUILDINGS, BUILDING_BY_ID, RABBIT_X, WORLD_W } from './townData';
+import { ZOOM } from './view';
 
 let resolveTown!: (s: TownScene) => void;
 export const townReady = new Promise<TownScene>((r) => (resolveTown = r));
@@ -10,7 +11,6 @@ export const townReady = new Promise<TownScene>((r) => (resolveTown = r));
 const W = 640;
 const H = 300;
 const GROUND = 258;
-const SCALE = 3;
 const FONT = 'Kanit, sans-serif';
 const TAP_SLOP = 8; // px a pointer may move and still count as a tap
 // minimap bar
@@ -27,7 +27,7 @@ export class TownScene extends Phaser.Scene {
   private selected: string | null = null;
   private arrow!: Phaser.GameObjects.Graphics;
   private mini!: Phaser.GameObjects.Graphics;
-  private clouds: Phaser.GameObjects.Graphics[] = [];
+  private clouds: Phaser.GameObjects.Image[] = [];
   private cloudWrap = 0;
   private dragging = false;
   private onMini = false;
@@ -51,19 +51,19 @@ export class TownScene extends Phaser.Scene {
     makeTextures(this);
     makeTownArt(this);
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, WORLD_W, H);
+    cam.setOrigin(0, 0).setZoom(ZOOM); // scroll is clamped by hand, see clamp()
 
     const bd = drawTownBackdrop(this, WORLD_W, W, H, GROUND);
     this.clouds = bd.clouds;
     this.cloudWrap = bd.cloudWrap;
 
-    this.add.image(1450, GROUND + 4, 'deco_fountain').setOrigin(0.5, 1).setScale(SCALE).setDepth(2);
+    this.addRabbit();
 
     for (const b of BUILDINGS) {
       const img = this.add
         .image(b.x, GROUND + 4, 'bld_' + b.id)
         .setOrigin(0.5, 1)
-        .setScale(SCALE)
+        .setScale(1 / R)
         .setDepth(2)
         .setInteractive({ useHandCursor: true });
       img.on('pointerover', () => img.setTint(0xfff1c8));
@@ -78,46 +78,52 @@ export class TownScene extends Phaser.Scene {
       this.labels.set(b.id, label);
     }
 
-    // townsfolk: the heroes wander between the buildings
+    // townsfolk: little mochi bunnies hop between the buildings
     const ranges: [number, number][] = [[900, 1250], [980, 1500], [1250, 1750], [600, 1100]];
-    HEROES.forEach((h, i) => {
+    HEROES.forEach((_h, i) => {
       const [a, b] = ranges[i % ranges.length];
-      const s = this.add.sprite(Phaser.Math.Between(a, b), GROUND + 20, 'hero_' + h.id).setOrigin(0.5, 1).setScale(1.25).setDepth(5);
-      this.tweens.add({ targets: s, y: s.y - 2, duration: 160, yoyo: true, repeat: -1 });
+      const s = this.add
+        .image(Phaser.Math.Between(a, b), GROUND + 22, 'folk_' + (i % FOLK_COLORS.length))
+        .setOrigin(0.5, 1)
+        .setScale(1 / R)
+        .setDepth(5);
       this.wander(s, a, b);
     });
 
     this.arrow = this.add.graphics().setDepth(8);
-    this.arrow.fillStyle(0xffd56b);
-    for (let i = 0; i < 4; i++) this.arrow.fillRect(-8 + i * 2, i * 3, 16 - i * 4, 3);
+    this.arrow.fillStyle(0xffd56b).fillTriangle(-8, 0, 8, 0, 0, 10);
+    this.arrow.lineStyle(1.5, 0x2f2538).strokeTriangle(-8, 0, 8, 0, 0, 10);
     this.arrow.setVisible(false);
 
     this.mini = this.add.graphics().setScrollFactor(0).setDepth(10);
 
     // ---- input: drag to scroll, tap to select, minimap to jump ----
+    // pointer x/y are canvas pixels; divide by ZOOM to get view units
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      const px = p.x / ZOOM;
       if (this.inMini(p)) {
         this.onMini = true;
-        this.jumpMini(p.x);
+        this.jumpMini(px);
         return;
       }
       this.tweens.killTweensOf(cam);
       this.dragging = true;
-      this.downX = this.lastX = p.x;
+      this.downX = this.lastX = px;
       this.downScroll = cam.scrollX;
       this.moved = 0;
       this.vel = 0;
       this.lastT = this.time.now;
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (this.onMini && p.isDown) return this.jumpMini(p.x);
+      const px = p.x / ZOOM;
+      if (this.onMini && p.isDown) return this.jumpMini(px);
       if (!this.dragging) return;
-      cam.scrollX = this.clamp(this.downScroll - (p.x - this.downX));
-      this.moved = Math.max(this.moved, Math.abs(p.x - this.downX));
+      cam.scrollX = this.clamp(this.downScroll - (px - this.downX));
+      this.moved = Math.max(this.moved, Math.abs(px - this.downX));
       const now = this.time.now;
       const dt = now - this.lastT;
-      if (dt > 0) this.vel = (-(p.x - this.lastX) / dt) * 0.6 + this.vel * 0.4;
-      this.lastX = p.x;
+      if (dt > 0) this.vel = (-(px - this.lastX) / dt) * 0.6 + this.vel * 0.4;
+      this.lastX = px;
       this.lastT = now;
     });
     const up = (p: Phaser.Input.Pointer) => {
@@ -139,7 +145,7 @@ export class TownScene extends Phaser.Scene {
     this.input.on('wheel', (_p: unknown, _o: unknown, dx: number, dy: number) => {
       this.tweens.killTweensOf(cam);
       this.vel = 0;
-      cam.scrollX = this.clamp(cam.scrollX + dx + dy);
+      cam.scrollX = this.clamp(cam.scrollX + (dx + dy) / ZOOM);
     });
     this.cursors = this.input.keyboard?.createCursorKeys();
 
@@ -147,19 +153,57 @@ export class TownScene extends Phaser.Scene {
     resolveTown(this);
   }
 
-  private wander(s: Phaser.GameObjects.Sprite, a: number, b: number) {
-    const tx = Phaser.Math.Between(a, b);
-    s.setFlipX(tx < s.x);
+  /** The landmark: a giant mochi rabbit pounding mochi; the mallet swings and the mochi squashes. */
+  private addRabbit() {
+    const s = 1 / R;
+    const left = RABBIT_X - RABBIT.w / 2;
+    const top = GROUND + 4 - RABBIT.h;
+    this.add.image(RABBIT_X, GROUND + 4, 'deco_rabbit').setOrigin(0.5, 1).setScale(s).setDepth(2);
+    const mochi = this.add
+      .image(left + RABBIT.mochi[0], top + RABBIT.mochi[1], 'deco_mochi')
+      .setOrigin(0.5, 1)
+      .setScale(s)
+      .setDepth(2.1);
+    const k = RABBIT.kine;
+    const kine = this.add
+      .image(left + RABBIT.shoulder[0], top + RABBIT.shoulder[1], 'deco_kine')
+      .setOrigin(k.px / k.w, 0.5)
+      .setScale(s)
+      .setDepth(2.2)
+      .setAngle(40);
     this.tweens.add({
-      targets: s,
-      x: tx,
-      duration: Math.abs(tx - s.x) * 28 + 200,
-      onComplete: () => this.time.delayedCall(Phaser.Math.Between(600, 2800), () => this.wander(s, a, b)),
+      targets: kine,
+      angle: -12,
+      duration: 300,
+      ease: 'Quad.easeIn',
+      yoyo: true,
+      hold: 140,
+      repeatDelay: 650,
+      repeat: -1,
+      onYoyo: () =>
+        this.tweens.add({ targets: mochi, scaleY: s * 0.6, scaleX: s * 1.2, duration: 90, yoyo: true, ease: 'Sine.easeOut' }),
     });
   }
 
+  /** Bunnies hop to a random spot in their range, rest, then pick another. */
+  private wander(s: Phaser.GameObjects.Image, a: number, b: number) {
+    const tx = Phaser.Math.Between(a, b);
+    const base = GROUND + 22;
+    s.setFlipX(tx < s.x);
+    const hops = Math.max(1, Math.round(Math.abs(tx - s.x) / 26));
+    this.tweens.add({
+      targets: s,
+      x: tx,
+      duration: hops * 340,
+      onComplete: () => this.time.delayedCall(Phaser.Math.Between(600, 2800), () => this.wander(s, a, b)),
+    });
+    this.tweens.add({ targets: s, y: base - 7, duration: 170, yoyo: true, repeat: hops - 1, ease: 'Sine.easeOut' });
+  }
+
   private inMini(p: Phaser.Input.Pointer) {
-    return p.y >= MY - 6 && p.x >= MX - 4 && p.x <= MX + MW + 4;
+    const x = p.x / ZOOM;
+    const y = p.y / ZOOM;
+    return y >= MY - 6 && x >= MX - 4 && x <= MX + MW + 4;
   }
 
   private jumpMini(x: number) {
@@ -223,7 +267,7 @@ export class TownScene extends Phaser.Scene {
     const g = this.mini.clear();
     const sx = this.cameras.main.scrollX;
     g.fillStyle(0x000000, 0.45).fillRect(MX - 4, MY - 2, MW + 8, MH + 4);
-    g.fillStyle(0x6cb04c, 0.9).fillRect(MX, MY + MH - 3, MW, 3);
+    g.fillStyle(0xd3c9ee, 0.9).fillRect(MX, MY + MH - 3, MW, 3);
     for (const b of BUILDINGS) {
       const x = Math.round(MX + (b.x / WORLD_W) * MW);
       const color = b.id === 'arena' ? 0xffd56b : b.open ? 0xffffff : 0x9aa4ad;

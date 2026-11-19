@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { ZOOM } from './view';
 import { SKILLS, lvOf, nodeOf } from '../sim/skills';
 import type { Build, CombatEvent, CombatResult, CooldownTrace, Fx, Side } from '../sim/types';
 import { makeTextures } from './sprites';
@@ -63,6 +64,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   create() {
+    this.cameras.main.setOrigin(0, 0).setZoom(ZOOM);
     makeTextures(this);
     this.drawBackground();
     this.fighters = [0, 1].map((i) =>
